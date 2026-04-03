@@ -210,19 +210,29 @@ function mpiReqSignString(fields) {
     .join('');
 }
 
-function logMpiReqSigningDetails(fields, preSignString, generatedMac) {
-  const sequence = getMpiReqMacFieldSequence(fields).map(([name, value], index) => ({
-    position: index + 1,
-    field: name,
+// Temporary helper for Cardzone MAC debugging.
+function buildMpiReqMacDebugRows(fields) {
+  return getMpiReqMacFieldSequence(fields).map(([field, value]) => ({
+    field,
     value: value || '',
-    state: value ? 'populated' : 'blank',
+  }));
+}
+
+function logMpiReqSigningDetails(fields, preSignString, generatedMac) {
+  const sequenceRows = buildMpiReqMacDebugRows(fields);
+  const withBlankState = sequenceRows.map((row, index) => ({
+    index: index + 1,
+    field: row.field,
+    value: row.value,
+    blank: row.value === '',
   }));
 
-  console.log('[Cardzone][signing] MPIReq fields:', JSON.stringify(fields));
-  console.log('[Cardzone][signing] Field sequence used for signing:', JSON.stringify(sequence.map(item => item.field)));
-  console.log('[Cardzone][signing] Field-by-field details:', JSON.stringify(sequence));
-  console.log('[Cardzone][signing] Pre-sign concatenated string:', preSignString);
-  console.log('[Cardzone][signing] Generated MPI_MAC (base64url, no padding):', generatedMac);
+  console.log('[Cardzone][signing] MPIReq payload fields:', JSON.stringify(fields));
+  console.log('[Cardzone][signing] MAC fields in exact order:', JSON.stringify(sequenceRows.map(item => item.field)));
+  console.log('[Cardzone][signing] MAC helper rows:', JSON.stringify(sequenceRows));
+  console.log('[Cardzone][signing] MAC helper rows with blank flag:', JSON.stringify(withBlankState));
+  console.log('[Cardzone][signing] Final concatenated pre-sign string:', preSignString);
+  console.log('[Cardzone][signing] Generated MPI_MAC (Base64URL, no padding):', generatedMac);
 }
 
 function resolveResponseLink(rawResponseLink, requestBaseUrl, txnId) {
@@ -544,14 +554,6 @@ async function handleStartPayment(req, res) {
     MPI_PURCH_DATE: tx.purchDate,
     MPI_PURCH_CURR: tx.currency,
     MPI_PURCH_AMT: tx.amountMinor,
-    MPI_EMAIL: tx.email,
-    MPI_MOBILE_PHONE: tx.mobilePhone,
-    MPI_MOBILE_PHONE_CC: tx.mobilePhoneCc,
-    MPI_BILL_ADDR_CNTRY: tx.billCountry,
-    MPI_BILL_ADDR_CITY: tx.billCity,
-    MPI_BILL_ADDR_POSTCODE: tx.billPostcode,
-    MPI_BILL_ADDR_LINE1: tx.billLine1,
-    MPI_RESPONSE_TYPE: tx.responseType,
     MPI_RESPONSE_LINK: tx.responseLink,
   };
 
