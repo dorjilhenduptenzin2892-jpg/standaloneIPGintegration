@@ -45,6 +45,7 @@ const CARDZONE_PROFILE_URL = process.env.CARDZONE_PROFILE_URL || '';
 const CALLBACK_BASE_URL = process.env.CALLBACK_BASE_URL || `http://localhost:${PORT}`;
 const RESPONSE_TYPE = process.env.RESPONSE_TYPE || 'STRING'; // STRING | JSON | default blank
 const DEFAULT_CURRENCY = process.env.DEFAULT_CURRENCY || '064';
+const MPIREQ_MAC_MODE = process.env.MPIREQ_MAC_MODE || '';
 const MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC = process.env.MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC === 'true';
 
 // If Cardzone enrolled you for key-exchange MAC verification, set to true.
@@ -189,8 +190,28 @@ function mkReqSignString({ merchantId, purchaseId, pubKey }) {
 
 // Cardzone transaction request MAC field order from the PDF.
 // All values are concatenated as a plain string, no special separator.
+function getMpiReqMacOptions() {
+  switch ((MPIREQ_MAC_MODE || '').trim().toLowerCase()) {
+    case 'spec-response-link':
+      return { mode: 'spec-response-link', includeResponseLink: true, includeResponseType: true };
+    case 'spec-no-response-type':
+      return { mode: 'spec-no-response-type', includeResponseLink: false, includeResponseType: false };
+    case 'spec-no-response-type-response-link':
+      return { mode: 'spec-no-response-type-response-link', includeResponseLink: true, includeResponseType: false };
+    case 'spec':
+      return { mode: 'spec', includeResponseLink: false, includeResponseType: true };
+    default:
+      return {
+        mode: MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC ? 'spec-response-link' : 'spec',
+        includeResponseLink: MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC,
+        includeResponseType: true,
+      };
+  }
+}
+
 function mpiReqSignString(fields, options = {}) {
   const includeResponseLink = !!options.includeResponseLink;
+  const includeResponseType = options.includeResponseType !== false;
   const lineItems = Array.isArray(fields.MPI_LINE_ITEM) ? fields.MPI_LINE_ITEM : [];
   const flattenedLineItems = lineItems
     .map(item => `${item.MPI_ITEM_ID || ''}${item.MPI_ITEM_REMARK || ''}${item.MPI_ITEM_QUANTITY || ''}${item.MPI_ITEM_AMOUNT || ''}${item.MPI_ITEM_CURRENCY || ''}`)
@@ -231,14 +252,37 @@ function mpiReqSignString(fields, options = {}) {
     fields.MPI_MOBILE_PHONE,
     fields.MPI_MOBILE_PHONE_CC,
     flattenedLineItems,
-    fields.MPI_RESPONSE_TYPE,
   ];
+
+  if (includeResponseType) {
+    signParts.push(fields.MPI_RESPONSE_TYPE);
+  }
 
   if (includeResponseLink) {
     signParts.push(fields.MPI_RESPONSE_LINK);
   }
 
   return signParts.map(v => v || '').join('');
+}
+
+function resolveResponseLink(rawResponseLink, requestBaseUrl, txnId) {
+  const fallback = `${requestBaseUrl}/return?txnId=${encodeURIComponent(txnId)}`;
+  const base = String(rawResponseLink || '').trim();
+  if (!base) return fallback;
+
+  try {
+    const url = new URL(base, requestBaseUrl);
+    if (!url.searchParams.get('txnId')) {
+      url.searchParams.set('txnId', txnId);
+    }
+    return url.toString();
+  } catch {
+    if (base.includes('txnId=')) {
+      return base.replace(/txnId=([^&]*)/, (_m, current) => `txnId=${current || encodeURIComponent(txnId)}`);
+    }
+    const separator = base.includes('?') ? '&' : '?';
+    return `${base}${separator}txnId=${encodeURIComponent(txnId)}`;
+  }
 }
 
 function mpiResVerifyString(fields) {
@@ -594,7 +638,7 @@ async function handleStartPayment(req, res) {
     billPostcode: (form.billPostcode || '').trim(),
     billLine1: (form.billLine1 || '').trim(),
     responseType: form.responseType || RESPONSE_TYPE,
-    responseLink: (form.responseLink || `${CALLBACK_BASE_URL}/return?txnId=${txnId}`).trim(),
+    responseLink: resolveResponseLink(form.responseLink, CALLBACK_BASE_URL, txnId),
     merchantPrivateKeyPem: keys.privateKeyPem,
     merchantPublicKeyPem: keys.publicKeyPem,
     cardzonePublicKeyBase64Url: mkReqRes.pubKey,
@@ -623,19 +667,15 @@ async function handleStartPayment(req, res) {
     MPI_RESPONSE_LINK: tx.responseLink,
   };
 
-  const macVariant = MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC
-    ? 'spec+MPI_RESPONSE_LINK'
-    : 'spec';
-  const mpiReqSignInput = mpiReqSignString(mpiReq, {
-    includeResponseLink: MPIREQ_INCLUDE_RESPONSE_LINK_IN_MAC,
-  });
+  const macOptions = getMpiReqMacOptions();
+  const mpiReqSignInput = mpiReqSignString(mpiReq, macOptions);
 
   mpiReq.MPI_MAC = signSha256WithRsaBase64Url(
     mpiReqSignInput,
     tx.merchantPrivateKeyPem,
   );
 
-  console.log('[Cardzone][signing] MAC variant=', macVariant);
+  console.log('[Cardzone][signing] MAC variant=', macOptions.mode);
 
   tx.requestFields = mpiReq;
   tx.status = 'REDIRECTED_TO_HOSTED_PAGE';
