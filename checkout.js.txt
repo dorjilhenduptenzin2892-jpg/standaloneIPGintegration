@@ -896,6 +896,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://${req.headers.host}`);
 
+    if (req.method === 'GET' && (u.pathname === '/favicon.ico' || u.pathname === '/favicon.png')) {
+      res.writeHead(204, { 'Cache-Control': 'public, max-age=86400' });
+      return res.end();
+    }
+
     if (req.method === 'GET' && u.pathname === '/') {
       return html(res, 200, renderCheckoutPage());
     }

@@ -831,6 +831,12 @@ module.exports = async function handler(req, res) {
   try {
     const u = new URL(req.url, `http://${req.headers.host}`);
 
+    if (req.method === 'GET' && (u.pathname === '/favicon.ico' || u.pathname === '/favicon.png')) {
+      res.statusCode = 204;
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.end();
+    }
+
     if (req.method === 'GET' && u.pathname === '/') {
       return html(res, 200, renderCheckoutPage(getRequestBaseUrl(req)));
     }
