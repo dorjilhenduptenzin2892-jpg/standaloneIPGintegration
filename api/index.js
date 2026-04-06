@@ -332,11 +332,11 @@ function renderAutoPostPage(action, fields) {
   return `<!doctype html>
 <html>
 <head><meta charset="utf-8"><title>Redirecting...</title></head>
-<body style="font-family:Arial,sans-serif;padding:24px">
+<body onload="document.forms[0].submit()" style="font-family:Arial,sans-serif;padding:24px">
   <p>Redirecting to secure Cardzone payment page...</p>
   <form id="payForm" method="post" action="${escapeHtml(action)}">${inputs}</form>
   <noscript><button type="submit" form="payForm">Continue</button></noscript>
-  <script>document.getElementById('payForm').submit();</script>
+  <script>document.forms[0].submit();</script>
 </body>
 </html>`;
 }
@@ -444,7 +444,7 @@ async function handleInitiate(req, res) {
 
   const requestBaseUrl = getRequestBaseUrl(req);
   const purchDate = formatPurchDate(new Date());
-  const callbackReturnLink = `${requestBaseUrl}/return?txnId=${encodeURIComponent(txnId)}`;
+  const callbackUrl = `${requestBaseUrl}/api/callback`;
 
   const keys = createRsaKeyPair();
 
@@ -478,7 +478,7 @@ async function handleInitiate(req, res) {
     MPI_PURCH_DATE: purchDate,
     MPI_PURCH_CURR: DEFAULT_CURRENCY,
     MPI_PURCH_AMT: amountMinor,
-    MPI_RESPONSE_LINK: callbackReturnLink,
+    MPI_RESPONSE_LINK: callbackUrl,
   };
 
   if (email) mpiReq.MPI_EMAIL = email;
@@ -488,7 +488,10 @@ async function handleInitiate(req, res) {
   const mpiMac = signSha256WithRsaBase64Url(mpiReqSignInput, keys.privateKeyPem);
   mpiReq.MPI_MAC = mpiMac;
 
-  console.log('[Cardzone][mercReq] endpoint=', CARDZONE_REDIRECT_URL);
+  const mercReqUrl = CARDZONE_REDIRECT_URL;
+  console.log('Returning auto-submit HTML to Cardzone');
+  console.log('Cardzone URL:', mercReqUrl);
+  console.log('[Cardzone][mercReq] endpoint=', mercReqUrl);
   console.log('[Cardzone][mercReq] flow=hosted-page html-form-post=true');
   logMpiReqSigningDetails(mpiReq, mpiReqSignInput, mpiMac);
 
@@ -515,7 +518,7 @@ async function handleInitiate(req, res) {
       response: mkReqRes,
     },
     mercReq: {
-      action: CARDZONE_REDIRECT_URL,
+      action: mercReqUrl,
       requestFields: mpiReq,
       signInput: mpiReqSignInput,
     },
@@ -525,7 +528,7 @@ async function handleInitiate(req, res) {
   };
 
   await saveTransaction(tx);
-  return html(res, 200, renderAutoPostPage(CARDZONE_REDIRECT_URL, mpiReq));
+  return html(res, 200, renderAutoPostPage(mercReqUrl, mpiReq));
 }
 
 async function handleCallback(req, res) {
@@ -547,6 +550,8 @@ async function handleCallback(req, res) {
     );
   }
 
+  console.log('Callback received for txn:', txnId);
+
   const hasMac = !!fields.MPI_MAC;
   const verifyInput = mpiResVerifyString(fields);
   const macVerified =
@@ -560,6 +565,9 @@ async function handleCallback(req, res) {
     errorCode: fields.MPI_ERROR_CODE,
     approvalCode: fields.MPI_APPR_CODE,
   });
+
+  console.log('MPI_ERROR_CODE:', fields.MPI_ERROR_CODE || '');
+  console.log('MAC verified:', macVerified);
 
   tx.callback = {
     receivedAt: new Date().toISOString(),
@@ -630,7 +638,7 @@ async function handleReturn(req, res) {
       202,
       renderMessagePage(
         'Payment processing',
-        'Final payment status is not available yet. Waiting for Cardzone callback.',
+        'Payment is still processing. Please wait or refresh.',
         {
           txnId: tx.txnId,
           status: tx.status,
@@ -638,13 +646,6 @@ async function handleReturn(req, res) {
         }
       )
     );
-  }
-
-  const target = tx.status === 'SUCCESS' ? tx.successReturnUrl : tx.failReturnUrl;
-  const noRedirect = u.searchParams.get('noRedirect') === '1';
-  if (target && !noRedirect) {
-    const location = appendResultParams(target, { txnId: tx.txnId, status: tx.status });
-    if (location) return redirect(res, location);
   }
 
   return html(
@@ -661,6 +662,24 @@ async function handleReturn(req, res) {
       errorDesc: tx.callback?.fields?.MPI_ERROR_DESC || null,
     })
   );
+}
+
+async function handleTxDebug(req, res, txnId) {
+  const tx = await getTransaction(txnId);
+  if (!tx) {
+    return json(res, 404, {
+      error: 'Transaction not found',
+      txnId,
+    });
+  }
+
+  return json(res, 200, {
+    txnId: tx.txnId,
+    status: tx.status,
+    callbackReceived: !!tx.callback,
+    mpiErrorCode: tx.callback?.fields?.MPI_ERROR_CODE || null,
+    macVerified: tx.macVerification?.macVerified ?? null,
+  });
 }
 
 function handleHealth(req, res) {
@@ -695,6 +714,15 @@ module.exports = async function handler(req, res) {
 
     if ((req.method === 'GET' || req.method === 'POST') && (u.pathname === '/return' || u.pathname === '/api/return')) {
       return await handleReturn(req, res);
+    }
+
+    if (req.method === 'GET' && (u.pathname.startsWith('/api/tx/') || u.pathname.startsWith('/tx/'))) {
+      const parts = u.pathname.split('/').filter(Boolean);
+      const txnId = parts[parts.length - 1] || '';
+      if (!txnId) {
+        return json(res, 400, { error: 'txnId is required' });
+      }
+      return await handleTxDebug(req, res, txnId);
     }
 
     if (req.method === 'GET' && (u.pathname === '/health' || u.pathname === '/api/health')) {
