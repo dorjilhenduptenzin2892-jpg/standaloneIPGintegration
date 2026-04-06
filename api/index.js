@@ -567,6 +567,9 @@ async function handleCallback(req, res) {
   });
 
   console.log('MPI_ERROR_CODE:', fields.MPI_ERROR_CODE || '');
+  console.log('MPI_ERROR_DESC:', fields.MPI_ERROR_DESC || '');
+  console.log('MPI_APPR_CODE:', fields.MPI_APPR_CODE || '');
+  console.log('MPI_RRN:', fields.MPI_RRN || '');
   console.log('MAC verified:', macVerified);
 
   tx.callback = {
@@ -655,7 +658,7 @@ async function handleReturn(req, res) {
     renderMessagePage(
       `Payment Result: ${tx.status}`,
       tx.macVerification?.macVerified && tx.status === 'FAILED'
-        ? 'Payment integration succeeded, but transaction was declined by Cardzone/host.'
+        ? 'Payment integration succeeded, but the transaction was declined by Cardzone/host.'
         : 'Payment status resolved from backend transaction record.',
       {
         integrationStatus: tx.macVerification?.macVerified
@@ -676,6 +679,7 @@ async function handleReturn(req, res) {
         MPI_APPR_CODE: tx.callback?.fields?.MPI_APPR_CODE || null,
         MPI_RRN: tx.callback?.fields?.MPI_RRN || null,
         MPI_REFERRAL_CODE: tx.callback?.fields?.MPI_REFERRAL_CODE || null,
+        MPI_BIN: tx.callback?.fields?.MPI_BIN || null,
         allResponseFields: tx.callback?.rawResponseFields || tx.callback?.fields || {},
       }
     )
