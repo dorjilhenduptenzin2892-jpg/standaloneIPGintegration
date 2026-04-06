@@ -260,6 +260,11 @@ function mapFinalStatus({ hasMac, macVerified, errorCode, approvalCode }) {
   return 'FAILED';
 }
 
+function mapTransactionLifecycleStatus({ callbackReceived, hasMac, macVerified, errorCode, approvalCode }) {
+  if (!callbackReceived) return 'PENDING';
+  return mapFinalStatus({ hasMac, macVerified, errorCode, approvalCode });
+}
+
 function txFilePath(txnId) {
   const safeId = String(txnId || '').replace(/[^a-zA-Z0-9_-]/g, '');
   return path.join(TEMP_DIR, `txn_${safeId}.json`);
@@ -559,7 +564,8 @@ async function handleCallback(req, res) {
       ? verifySha256WithRsaBase64Url(verifyInput, fields.MPI_MAC, tx.security.cardzonePublicKeyBase64Url)
       : false;
 
-  const finalStatus = mapFinalStatus({
+  const finalStatus = mapTransactionLifecycleStatus({
+    callbackReceived: true,
     hasMac,
     macVerified,
     errorCode: fields.MPI_ERROR_CODE,
@@ -570,6 +576,8 @@ async function handleCallback(req, res) {
   console.log('MPI_ERROR_DESC:', fields.MPI_ERROR_DESC || '');
   console.log('MPI_APPR_CODE:', fields.MPI_APPR_CODE || '');
   console.log('MPI_RRN:', fields.MPI_RRN || '');
+  console.log('MPI_REFERRAL_CODE:', fields.MPI_REFERRAL_CODE || '');
+  console.log('MPI_BIN:', fields.MPI_BIN || '');
   console.log('MAC verified:', macVerified);
 
   tx.callback = {
@@ -607,7 +615,6 @@ async function handleCallback(req, res) {
 async function handleReturn(req, res) {
   const u = new URL(req.url, `http://${req.headers.host}`);
   let txnId = u.searchParams.get('txnId');
-  const finalStatuses = new Set(['SUCCESS', 'FAILED', 'VERIFY_FAILED']);
 
   if (req.method === 'POST' && !txnId) {
     const raw = await parseBody(req);
@@ -634,7 +641,14 @@ async function handleReturn(req, res) {
   }
 
   const callbackReceived = !!tx.callback;
-  const hasFinalState = callbackReceived && finalStatuses.has(tx.status);
+  const effectiveStatus = mapTransactionLifecycleStatus({
+    callbackReceived,
+    hasMac: !!tx.callback?.fields?.MPI_MAC,
+    macVerified: !!tx.macVerification?.macVerified,
+    errorCode: tx.callback?.fields?.MPI_ERROR_CODE,
+    approvalCode: tx.callback?.fields?.MPI_APPR_CODE,
+  });
+  const hasFinalState = effectiveStatus !== 'PENDING';
 
   if (!hasFinalState) {
     return html(
@@ -645,7 +659,7 @@ async function handleReturn(req, res) {
         'Payment is still processing. Please wait or refresh.',
         {
           txnId: tx.txnId,
-          status: tx.status,
+          status: effectiveStatus,
           callbackReceived,
         }
       )
@@ -656,18 +670,18 @@ async function handleReturn(req, res) {
     res,
     200,
     renderMessagePage(
-      `Payment Result: ${tx.status}`,
-      tx.macVerification?.macVerified && tx.status === 'FAILED'
-        ? 'Payment integration succeeded, but the transaction was declined by Cardzone/host.'
+      `Payment Result: ${effectiveStatus}`,
+      tx.macVerification?.macVerified && effectiveStatus === 'FAILED'
+        ? 'Integration succeeded, but Cardzone/host returned a failed transaction response.'
         : 'Payment status resolved from backend transaction record.',
       {
         integrationStatus: tx.macVerification?.macVerified
           ? 'INTEGRATION_SUCCESS'
-          : tx.status === 'VERIFY_FAILED'
+          : effectiveStatus === 'VERIFY_FAILED'
             ? 'INTEGRATION_VERIFY_FAILED'
             : 'INTEGRATION_PENDING_OR_NOT_VERIFIED',
         txnId: tx.txnId,
-        status: tx.status,
+        status: effectiveStatus,
         amountMinor: tx.amountMinor,
         currency: tx.currency,
         orderRef: tx.orderRef,
