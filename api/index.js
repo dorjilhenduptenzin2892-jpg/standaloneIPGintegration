@@ -595,6 +595,7 @@ async function handleCallback(req, res) {
 async function handleReturn(req, res) {
   const u = new URL(req.url, `http://${req.headers.host}`);
   let txnId = u.searchParams.get('txnId');
+  const finalStatuses = new Set(['SUCCESS', 'FAILED', 'VERIFY_FAILED']);
 
   if (req.method === 'POST' && !txnId) {
     const raw = await parseBody(req);
@@ -617,6 +618,22 @@ async function handleReturn(req, res) {
       res,
       404,
       renderMessagePage('Transaction not found', 'No transaction record found for this reference.', { txnId })
+    );
+  }
+
+  if (!finalStatuses.has(tx.status)) {
+    return html(
+      res,
+      202,
+      renderMessagePage(
+        'Payment processing',
+        'Final payment status is not available yet. Please check again after callback is received.',
+        {
+          txnId: tx.txnId,
+          status: tx.status,
+          callbackReceived: !!tx.callback,
+        }
+      )
     );
   }
 
