@@ -10,6 +10,7 @@ const CARDZONE_REDIRECT_URL =
   process.env.CARDZONE_REDIRECT_URL ||
   process.env.CARDZONE_MERCREQ_URL ||
   'https://3dsecure.bob.bt/3dss/mercReq';
+const CARDZONE_PROFILE_URL = process.env.CARDZONE_PROFILE_URL || '';
 const DEFAULT_CURRENCY = '356'; // INR - Indian Rupee
 const ENABLE_MKREQ_MAC = process.env.ENABLE_MKREQ_MAC === 'true';
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : path.join(os.tmpdir(), 'cardzone-backend');
@@ -170,6 +171,91 @@ function verifySha256WithRsaBase64Url(message, signatureBase64Url, publicKeyPemO
 
 function mkReqSignString({ merchantId, purchaseId, pubKey }) {
   return `${merchantId || ''}${purchaseId || ''}${pubKey || ''}`;
+}
+
+function normalizeCurrency(value) {
+  const v = String(value || '').trim();
+  return /^\d{3}$/.test(v) ? v : '';
+}
+
+function extractCurrencyCandidates(payload) {
+  if (!payload || typeof payload !== 'object') return [];
+
+  const keys = [
+    'currency', 'currencies', 'currencyCode', 'currencyCodes',
+    'defaultCurrency', 'txnCurrency', 'supportedCurrencies', 'allowedCurrencies',
+  ];
+
+  const out = new Set();
+
+  for (const k of keys) {
+    const raw = payload[k];
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const n = normalizeCurrency(item?.code || item?.currency || item);
+        if (n) out.add(n);
+      }
+      continue;
+    }
+
+    if (raw && typeof raw === 'object') {
+      const n = normalizeCurrency(raw.code || raw.currency || raw.value);
+      if (n) out.add(n);
+      continue;
+    }
+
+    const n = normalizeCurrency(raw);
+    if (n) out.add(n);
+  }
+
+  if (payload.data && typeof payload.data === 'object') {
+    for (const c of extractCurrencyCandidates(payload.data)) out.add(c);
+  }
+
+  return [...out];
+}
+
+async function fetchCardzoneMerchantProfile(merchantId) {
+  if (!CARDZONE_PROFILE_URL) return null;
+
+  const endpoint = CARDZONE_PROFILE_URL.includes('{merchantId}')
+    ? CARDZONE_PROFILE_URL.replace('{merchantId}', encodeURIComponent(merchantId))
+    : CARDZONE_PROFILE_URL;
+
+  const r = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ merchantId }),
+  });
+
+  const text = await r.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return null;
+  }
+
+  if (!r.ok) return null;
+  return data;
+}
+
+async function resolveMerchantCurrency(merchantId) {
+  const fallback = normalizeCurrency(DEFAULT_CURRENCY) || '356';
+  const mid = String(merchantId || '').trim();
+  if (!mid) return { currency: fallback, source: 'fallback-default' };
+
+  try {
+    const profile = await fetchCardzoneMerchantProfile(mid);
+    const candidates = extractCurrencyCandidates(profile || {});
+    if (candidates.length) {
+      return { currency: candidates[0], source: 'merchant-profile' };
+    }
+  } catch {
+    // Ignore lookup failures and use fallback
+  }
+
+  return { currency: fallback, source: 'fallback-default' };
 }
 
 function getMpiReqMacFieldSequence(fields) {
@@ -505,8 +591,9 @@ function renderPublicCheckoutPage(baseUrl) {
             </div>
 
             <div class="field">
-              <label for="currency">Currency (ISO 4217)</label>
-              <input id="currency" name="currency" maxlength="3" placeholder="356" value="${escapeHtml(DEFAULT_CURRENCY)}" />
+              <label for="currencyDisplay">Currency (Auto from MID)</label>
+              <input id="currencyDisplay" readonly value="Loading..." />
+              <input id="currency" name="currency" type="hidden" value="${escapeHtml(DEFAULT_CURRENCY)}" />
             </div>
 
             <div class="field">
@@ -530,6 +617,50 @@ function renderPublicCheckoutPage(baseUrl) {
       </section>
     </div>
   </div>
+  <script>
+    (function () {
+      const midInput = document.getElementById('merchantId');
+      const currencyInput = document.getElementById('currency');
+      const currencyDisplay = document.getElementById('currencyDisplay');
+      let timer = null;
+
+      async function updateCurrency() {
+        const merchantId = (midInput.value || '').trim();
+        if (!merchantId) {
+          currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
+          currencyDisplay.value = '${escapeHtml(DEFAULT_CURRENCY)} (default)';
+          return;
+        }
+
+        currencyDisplay.value = 'Fetching...';
+
+        try {
+          const res = await fetch('/api/merchant-currency?merchantId=' + encodeURIComponent(merchantId), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          const data = await res.json();
+          const code = (data && data.currency) ? String(data.currency) : '${escapeHtml(DEFAULT_CURRENCY)}';
+          currencyInput.value = code;
+          currencyDisplay.value = data && data.source === 'merchant-profile'
+            ? code + ' (from MID profile)'
+            : code + ' (default)';
+        } catch {
+          currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
+          currencyDisplay.value = '${escapeHtml(DEFAULT_CURRENCY)} (default)';
+        }
+      }
+
+      function debouncedUpdate() {
+        clearTimeout(timer);
+        timer = setTimeout(updateCurrency, 350);
+      }
+
+      midInput.addEventListener('input', debouncedUpdate);
+      updateCurrency();
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -552,7 +683,7 @@ async function handleInitiate(req, res) {
 
   const merchantId = String(input.merchantId || MERCHANT_ID_DEFAULT || '').trim();
   const amount = String(input.amount || '').trim();
-  const currency = String(input.currency || DEFAULT_CURRENCY || '').trim() || DEFAULT_CURRENCY;
+  const currencyInput = String(input.currency || '').trim();
   const orderRefInput = String(input.orderRef || '').trim();
   const customerRefInput = String(input.customerRef || '').trim();
   const customerName = String(input.customerName || '').trim();
@@ -592,6 +723,11 @@ async function handleInitiate(req, res) {
   } catch (error) {
     return html(res, 400, renderMessagePage('Invalid amount', error.message, { amount }));
   }
+
+  const currencyResolved = normalizeCurrency(currencyInput)
+    ? { currency: normalizeCurrency(currencyInput), source: 'request' }
+    : await resolveMerchantCurrency(merchantId);
+  const currency = currencyResolved.currency;
 
   const requestBaseUrl = getRequestBaseUrl(req);
   const purchDate = formatPurchDate(new Date());
@@ -866,6 +1002,24 @@ async function handleTxDebug(req, res, txnId) {
   });
 }
 
+async function handleMerchantCurrency(req, res) {
+  const u = new URL(req.url, `http://${req.headers.host}`);
+  const merchantId = String(u.searchParams.get('merchantId') || '').trim();
+
+  if (!merchantId) {
+    return json(res, 400, {
+      error: 'merchantId is required',
+    });
+  }
+
+  const resolved = await resolveMerchantCurrency(merchantId);
+  return json(res, 200, {
+    merchantId,
+    currency: resolved.currency,
+    source: resolved.source,
+  });
+}
+
 function handleHealth(req, res) {
   return json(res, 200, {
     ok: true,
@@ -894,6 +1048,10 @@ module.exports = async function handler(req, res) {
 
     if (req.method === 'POST' && (u.pathname === '/api/initiate' || u.pathname === '/initiate')) {
       return await handleInitiate(req, res);
+    }
+
+    if (req.method === 'GET' && (u.pathname === '/api/merchant-currency' || u.pathname === '/merchant-currency')) {
+      return await handleMerchantCurrency(req, res);
     }
 
     if (req.method === 'GET' && (u.pathname === '/callback' || u.pathname === '/api/callback')) {
