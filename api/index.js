@@ -5,11 +5,11 @@ const path = require('path');
 const os = require('os');
 
 const MERCHANT_ID_DEFAULT = process.env.MERCHANT_ID || '863990030700270';
-const CARDZONE_MKREQ_URL = process.env.CARDZONE_MKREQ_URL || 'https://czsecure.bob.bt/3dss/mkReq';
+const CARDZONE_MKREQ_URL = process.env.CARDZONE_MKREQ_URL || 'https://3dsecure.bob.bt/3dss/mkReq';
 const CARDZONE_REDIRECT_URL =
   process.env.CARDZONE_REDIRECT_URL ||
   process.env.CARDZONE_MERCREQ_URL ||
-  'https://czsecure.bob.bt/3dss/mercReq';
+  'https://3dsecure.bob.bt/3dss/mercReq';
 const DEFAULT_CURRENCY = '840';
 const ENABLE_MKREQ_MAC = process.env.ENABLE_MKREQ_MAC === 'true';
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : path.join(os.tmpdir(), 'cardzone-backend');
