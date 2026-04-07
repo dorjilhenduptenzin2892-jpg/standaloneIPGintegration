@@ -481,14 +481,14 @@ function renderPublicCheckoutPage(baseUrl) {
     <div class="hero">
       <section class="card">
         <span class="badge">Cardzone Hosted Payment</span>
-        <h1>Accept payments without your own website</h1>
-        <p>Enter your registered Merchant ID (MID) and payment amount. This page securely redirects customers to the bank's Cardzone payment screen.</p>
+        <h1>Fast, Simple, and Secure</h1>
+        <p>Complete your payment in just a few steps with a smooth and secure experience.</p>
         <ul class="list">
-          <li><span class="dot"></span><span>No merchant website required</span></li>
-          <li><span class="dot"></span><span>Bank-registered MID supported</span></li>
-          <li><span class="dot"></span><span>3D Secure flow handled by Cardzone</span></li>
+          <li><span class="dot"></span><span>Quick checkout flow</span></li>
+          <li><span class="dot"></span><span>Trusted payment security</span></li>
+          <li><span class="dot"></span><span>Smooth customer experience</span></li>
         </ul>
-        <p class="meta">Powered by backend endpoint at ${escapeHtml(baseUrl)}/api/initiate</p>
+        <p class="meta">Securely powered by Cardzone hosted payment.</p>
       </section>
 
       <section class="card">
