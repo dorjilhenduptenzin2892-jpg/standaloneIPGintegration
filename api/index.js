@@ -590,11 +590,7 @@ function renderPublicCheckoutPage(baseUrl) {
               <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
             </div>
 
-            <div class="field">
-              <label for="currencyDisplay">Currency (Auto from MID)</label>
-              <input id="currencyDisplay" readonly value="Loading..." />
-              <input id="currency" name="currency" type="hidden" value="${escapeHtml(DEFAULT_CURRENCY)}" />
-            </div>
+            <input id="currency" name="currency" type="hidden" value="${escapeHtml(DEFAULT_CURRENCY)}" />
 
             <div class="field">
               <label for="customerName">Customer Name</label>
@@ -621,18 +617,14 @@ function renderPublicCheckoutPage(baseUrl) {
     (function () {
       const midInput = document.getElementById('merchantId');
       const currencyInput = document.getElementById('currency');
-      const currencyDisplay = document.getElementById('currencyDisplay');
       let timer = null;
 
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
         if (!merchantId) {
           currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
-          currencyDisplay.value = '${escapeHtml(DEFAULT_CURRENCY)} (default)';
           return;
         }
-
-        currencyDisplay.value = 'Fetching...';
 
         try {
           const res = await fetch('/api/merchant-currency?merchantId=' + encodeURIComponent(merchantId), {
@@ -643,12 +635,8 @@ function renderPublicCheckoutPage(baseUrl) {
           const data = await res.json();
           const code = (data && data.currency) ? String(data.currency) : '${escapeHtml(DEFAULT_CURRENCY)}';
           currencyInput.value = code;
-          currencyDisplay.value = data && data.source === 'merchant-profile'
-            ? code + ' (from MID profile)'
-            : code + ' (default)';
         } catch {
           currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
-          currencyDisplay.value = '${escapeHtml(DEFAULT_CURRENCY)} (default)';
         }
       }
 
