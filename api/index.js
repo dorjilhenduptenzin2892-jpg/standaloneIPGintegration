@@ -178,6 +178,9 @@ function getMpiReqMacFieldSequence(fields) {
     .map(item => `${item.MPI_ITEM_ID || ''}${item.MPI_ITEM_REMARK || ''}${item.MPI_ITEM_QUANTITY || ''}${item.MPI_ITEM_AMOUNT || ''}${item.MPI_ITEM_CURRENCY || ''}`)
     .join('');
 
+  // NOTE: Phone fields (MPI_HOME_PHONE*, MPI_MOBILE_PHONE*, MPI_WORK_PHONE*) are intentionally 
+  // excluded from MAC signing to avoid field concatenation issues. Will be added back 
+  // once Cardzone confirms correct field order and null-handling requirements.
   return [
     ['MPI_TRANS_TYPE', fields.MPI_TRANS_TYPE],
     ['MPI_MERC_ID', fields.MPI_MERC_ID],
@@ -206,12 +209,6 @@ function getMpiReqMacFieldSequence(fields) {
     ['MPI_SHIP_ADDR_LINE2', fields.MPI_SHIP_ADDR_LINE2],
     ['MPI_SHIP_ADDR_LINE3', fields.MPI_SHIP_ADDR_LINE3],
     ['MPI_EMAIL', fields.MPI_EMAIL],
-    ['MPI_HOME_PHONE', fields.MPI_HOME_PHONE],
-    ['MPI_HOME_PHONE_CC', fields.MPI_HOME_PHONE_CC],
-    ['MPI_WORK_PHONE', fields.MPI_WORK_PHONE],
-    ['MPI_WORK_PHONE_CC', fields.MPI_WORK_PHONE_CC],
-    ['MPI_MOBILE_PHONE', fields.MPI_MOBILE_PHONE],
-    ['MPI_MOBILE_PHONE_CC', fields.MPI_MOBILE_PHONE_CC],
     ['MPI_LINE_ITEM_FLATTENED', flattenedLineItems],
     ['MPI_RESPONSE_TYPE', fields.MPI_RESPONSE_TYPE],
   ];
@@ -232,11 +229,23 @@ function buildMpiReqMacDebugRows(fields) {
 
 function logMpiReqSigningDetails(fields, preSignString, generatedMac) {
   const sequenceRows = buildMpiReqMacDebugRows(fields);
-  console.log('[Cardzone][signing] MPIReq payload fields:', JSON.stringify(fields));
-  console.log('[Cardzone][signing] MAC fields in exact order:', JSON.stringify(sequenceRows.map(item => item.field)));
-  console.log('[Cardzone][signing] MAC helper rows:', JSON.stringify(sequenceRows));
-  console.log('[Cardzone][signing] Final concatenated pre-sign string:', preSignString);
-  console.log('[Cardzone][signing] Generated MPI_MAC (Base64URL, no padding):', generatedMac);
+  console.log('\n========== MPIReq MAC SIGNING DEBUG ==========');
+  console.log('[Cardzone][signing] MPIReq payload fields:');
+  console.log(JSON.stringify(fields, null, 2));
+  console.log('\n[Cardzone][signing] MAC field sequence in exact order (name -> value):');
+  sequenceRows.forEach((row, idx) => {
+    const val = row.value || '';
+    const preview = val.length > 60 ? val.substring(0, 60) + '...' : val;
+    console.log(`  [${idx + 1}] ${row.field}: "${preview}"`);
+  });
+  console.log('\n[Cardzone][signing] Field names in sequence:');
+  console.log(sequenceRows.map(item => item.field).join(' -> '));
+  console.log('\n[Cardzone][signing] Concatenated pre-sign string:');
+  console.log(`"${preSignString}"`);
+  console.log(`Pre-sign string length: ${preSignString.length} characters`);
+  console.log('\n[Cardzone][signing] Generated MPI_MAC (Base64URL, no padding):');
+  console.log(generatedMac);
+  console.log('============================================\n');
 }
 
 function mpiResVerifyString(fields) {
@@ -487,7 +496,9 @@ async function handleInitiate(req, res) {
   };
 
   if (email) mpiReq.MPI_EMAIL = email;
-  if (mobilePhone) mpiReq.MPI_MOBILE_PHONE = mobilePhone;
+  // NOTE: Phone fields (MPI_MOBILE_PHONE, MPI_HOME_PHONE, MPI_WORK_PHONE, etc.) 
+  // are intentionally excluded to avoid MAC verification failures. 
+  // Will be re-enabled once correct field order and null-handling is confirmed with Cardzone.
 
   const mpiReqSignInput = mpiReqSignString(mpiReq);
   const mpiMac = signSha256WithRsaBase64Url(mpiReqSignInput, keys.privateKeyPem);
