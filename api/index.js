@@ -398,6 +398,142 @@ function renderDeveloperHome(baseUrl) {
 </html>`;
 }
 
+function renderPublicCheckoutPage(baseUrl) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Secure Payment Checkout</title>
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#111a2e;
+      --panel-2:#0f1728;
+      --text:#e8edf8;
+      --muted:#a5b1cb;
+      --brand:#4f8cff;
+      --brand-2:#246bff;
+      --border:#23314d;
+      --ok:#15b57a;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,Segoe UI,Arial,sans-serif;
+      color:var(--text);
+      background:radial-gradient(1000px 450px at 15% -10%, #1f3f7a 0%, transparent 55%),
+                 radial-gradient(1000px 450px at 85% -10%, #203264 0%, transparent 55%),
+                 var(--bg);
+      min-height:100vh;
+      padding:28px 16px;
+    }
+    .container{max-width:980px;margin:0 auto}
+    .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:20px}
+    .card{
+      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      border:1px solid var(--border);
+      border-radius:20px;
+      box-shadow:0 14px 50px rgba(0,0,0,.45);
+      padding:24px;
+    }
+    h1{margin:0 0 10px;font-size:28px;line-height:1.2}
+    p{margin:0;color:var(--muted)}
+    .badge{display:inline-block;background:rgba(79,140,255,.14);color:#9cc0ff;border:1px solid #2d4f8b;padding:6px 10px;border-radius:999px;font-size:12px;margin-bottom:12px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    .field.full{grid-column:1 / -1}
+    label{font-size:13px;color:#c8d5ef}
+    input,select{
+      width:100%;
+      border:1px solid #2a3a5a;
+      background:#0d1628;
+      color:var(--text);
+      border-radius:12px;
+      padding:12px 12px;
+      outline:none;
+      transition:border-color .2s,box-shadow .2s;
+    }
+    input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,140,255,.2)}
+    .submit{
+      margin-top:16px;
+      width:100%;
+      background:linear-gradient(180deg,var(--brand),var(--brand-2));
+      color:white;
+      border:0;
+      border-radius:12px;
+      padding:13px 16px;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:10px}
+    .list li{display:flex;gap:10px;color:#d4def3;font-size:14px}
+    .dot{height:10px;width:10px;border-radius:999px;background:var(--ok);margin-top:4px;flex:none}
+    .meta{margin-top:14px;font-size:12px;color:#8ea0c4}
+    @media (max-width:900px){
+      .hero{grid-template-columns:1fr}
+      .form-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="hero">
+      <section class="card">
+        <span class="badge">Cardzone Hosted Payment</span>
+        <h1>Accept payments without your own website</h1>
+        <p>Enter your registered Merchant ID (MID) and payment amount. This page securely redirects customers to the bank's Cardzone payment screen.</p>
+        <ul class="list">
+          <li><span class="dot"></span><span>No merchant website required</span></li>
+          <li><span class="dot"></span><span>Bank-registered MID supported</span></li>
+          <li><span class="dot"></span><span>3D Secure flow handled by Cardzone</span></li>
+        </ul>
+        <p class="meta">Powered by backend endpoint at ${escapeHtml(baseUrl)}/api/initiate</p>
+      </section>
+
+      <section class="card">
+        <form method="post" action="/api/initiate" autocomplete="on">
+          <div class="form-grid">
+            <div class="field full">
+              <label for="merchantId">Merchant ID (MID) *</label>
+              <input id="merchantId" name="merchantId" required placeholder="Enter bank-registered MID" value="${escapeHtml(MERCHANT_ID_DEFAULT)}" />
+            </div>
+
+            <div class="field">
+              <label for="amount">Amount *</label>
+              <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
+            </div>
+
+            <div class="field">
+              <label for="currency">Currency (ISO 4217)</label>
+              <input id="currency" name="currency" maxlength="3" placeholder="356" value="${escapeHtml(DEFAULT_CURRENCY)}" />
+            </div>
+
+            <div class="field">
+              <label for="customerName">Customer Name</label>
+              <input id="customerName" name="customerName" placeholder="Optional" />
+            </div>
+
+            <div class="field">
+              <label for="email">Email</label>
+              <input id="email" name="email" type="email" placeholder="Optional" />
+            </div>
+
+            <div class="field full">
+              <label for="mobilePhone">Mobile Number</label>
+              <input id="mobilePhone" name="mobilePhone" placeholder="Optional" />
+            </div>
+          </div>
+
+          <button class="submit" type="submit">Proceed to Secure Payment</button>
+        </form>
+      </section>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 function appendResultParams(targetUrl, { txnId, status }) {
   try {
     const u = new URL(targetUrl);
@@ -417,20 +553,20 @@ async function handleInitiate(req, res) {
   const merchantId = String(input.merchantId || MERCHANT_ID_DEFAULT || '').trim();
   const amount = String(input.amount || '').trim();
   const currency = String(input.currency || DEFAULT_CURRENCY || '').trim() || DEFAULT_CURRENCY;
-  const orderRef = String(input.orderRef || '').trim();
-  const customerRef = String(input.customerRef || '').trim();
+  const orderRefInput = String(input.orderRef || '').trim();
+  const customerRefInput = String(input.customerRef || '').trim();
   const customerName = String(input.customerName || '').trim();
   const email = String(input.email || '').trim();
   const mobilePhone = String(input.mobilePhone || '').trim();
   const successReturnUrl = String(input.successReturnUrl || '').trim();
   const failReturnUrl = String(input.failReturnUrl || '').trim();
   const txnId = String(input.txnId || generateTxnId()).trim();
+  const orderRef = orderRefInput || `ORD-${txnId}`;
+  const customerRef = customerRefInput || `CUST-${txnId.slice(-8)}`;
 
   const missing = [];
   if (!merchantId) missing.push('merchantId');
   if (!amount) missing.push('amount');
-  if (!orderRef) missing.push('orderRef');
-  if (!customerRef) missing.push('customerRef');
   if (!txnId) missing.push('txnId');
 
   if (missing.length) {
@@ -748,7 +884,11 @@ module.exports = async function handler(req, res) {
       return res.end();
     }
 
-    if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/api')) {
+    if (req.method === 'GET' && (u.pathname === '/' || u.pathname === '/checkout')) {
+      return html(res, 200, renderPublicCheckoutPage(getRequestBaseUrl(req)));
+    }
+
+    if (req.method === 'GET' && (u.pathname === '/api' || u.pathname === '/developer')) {
       return html(res, 200, renderDeveloperHome(getRequestBaseUrl(req)));
     }
 
