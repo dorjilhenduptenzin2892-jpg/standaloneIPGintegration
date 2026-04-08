@@ -11,7 +11,8 @@ const CARDZONE_REDIRECT_URL =
   process.env.CARDZONE_MERCREQ_URL ||
   'https://3dsecure.bob.bt/3dss/mercReq';
 const CARDZONE_PROFILE_URL = process.env.CARDZONE_PROFILE_URL || '';
-const DEFAULT_CURRENCY = '356'; // INR - Indian Rupee
+const MERCHANT_CURRENCY_DB_PATH =
+  process.env.MERCHANT_CURRENCY_DB_PATH || path.join(process.cwd(), 'data', 'merchant-currency.json');
 const ENABLE_MKREQ_MAC = process.env.ENABLE_MKREQ_MAC === 'true';
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : path.join(os.tmpdir(), 'cardzone-backend');
 const PAYMENT_LINK_TTL_MS = Number(process.env.PAYMENT_LINK_TTL_MS || 7 * 24 * 60 * 60 * 1000);
@@ -180,6 +181,30 @@ function normalizeCurrency(value) {
   return /^\d{3}$/.test(v) ? v : '';
 }
 
+function normalizeMerchantId(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+async function loadMerchantCurrencyDb() {
+  try {
+    const raw = await fs.readFile(MERCHANT_CURRENCY_DB_PATH, 'utf8');
+    const parsed = JSON.parse(raw || '{}');
+    const map = new Map();
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [mid, curr] of Object.entries(parsed)) {
+        const id = normalizeMerchantId(mid);
+        const code = normalizeCurrency(curr);
+        if (id && code) map.set(id, code);
+      }
+    }
+
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 function extractCurrencyCandidates(payload) {
   if (!payload || typeof payload !== 'object') return [];
 
@@ -243,9 +268,14 @@ async function fetchCardzoneMerchantProfile(merchantId) {
 }
 
 async function resolveMerchantCurrency(merchantId) {
-  const fallback = normalizeCurrency(DEFAULT_CURRENCY) || '356';
-  const mid = String(merchantId || '').trim();
-  if (!mid) return { currency: fallback, source: 'fallback-default' };
+  const mid = normalizeMerchantId(merchantId);
+  if (!mid) return { currency: '', source: 'missing-mid' };
+
+  const db = await loadMerchantCurrencyDb();
+  const dbCurrency = db.get(mid);
+  if (dbCurrency) {
+    return { currency: dbCurrency, source: 'mid-database' };
+  }
 
   try {
     const profile = await fetchCardzoneMerchantProfile(mid);
@@ -254,10 +284,10 @@ async function resolveMerchantCurrency(merchantId) {
       return { currency: candidates[0], source: 'merchant-profile' };
     }
   } catch {
-    // Ignore lookup failures and use fallback
+    // Ignore lookup failures and fail clearly if MID is not configured
   }
 
-  return { currency: fallback, source: 'fallback-default' };
+  return { currency: '', source: 'not-configured' };
 }
 
 function getMpiReqMacFieldSequence(fields) {
@@ -637,7 +667,7 @@ function renderPublicCheckoutPage(baseUrl) {
               <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
             </div>
 
-            <input id="currency" name="currency" type="hidden" value="${escapeHtml(DEFAULT_CURRENCY)}" />
+            <input id="currency" name="currency" type="hidden" value="" />
 
             <div class="field">
               <label for="customerName">Customer Name</label>
@@ -692,7 +722,7 @@ function renderPublicCheckoutPage(baseUrl) {
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
         if (!merchantId) {
-          currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
+          currencyInput.value = '';
           return;
         }
 
@@ -702,11 +732,16 @@ function renderPublicCheckoutPage(baseUrl) {
             headers: { 'Accept': 'application/json' }
           });
 
+          if (!res.ok) {
+            currencyInput.value = '';
+            return;
+          }
+
           const data = await res.json();
-          const code = (data && data.currency) ? String(data.currency) : '${escapeHtml(DEFAULT_CURRENCY)}';
+          const code = (data && data.currency) ? String(data.currency) : '';
           currencyInput.value = code;
         } catch {
-          currencyInput.value = '${escapeHtml(DEFAULT_CURRENCY)}';
+          currencyInput.value = '';
         }
       }
 
@@ -729,6 +764,10 @@ function renderPublicCheckoutPage(baseUrl) {
 
         try {
           await updateCurrency();
+
+          if (!currencyInput.value) {
+            throw new Error('MID currency not configured. Please add this MID in the merchant currency database.');
+          }
 
           const res = await fetch('/api/payment-links', {
             method: 'POST',
@@ -851,6 +890,18 @@ async function handleInitiate(req, res) {
     ? { currency: normalizeCurrency(currencyInput), source: 'request' }
     : await resolveMerchantCurrency(merchantId);
   const currency = currencyResolved.currency;
+
+  if (!currency) {
+    return html(
+      res,
+      400,
+      renderMessagePage(
+        'Currency not configured',
+        'No currency is configured for this MID. Add the MID to the merchant currency database first.',
+        { merchantId }
+      )
+    );
+  }
 
   const requestBaseUrl = getRequestBaseUrl(req);
   const purchDate = formatPurchDate(new Date());
@@ -1136,6 +1187,14 @@ async function handleMerchantCurrency(req, res) {
   }
 
   const resolved = await resolveMerchantCurrency(merchantId);
+  if (!resolved.currency) {
+    return json(res, 404, {
+      merchantId,
+      error: 'Currency not configured for this MID',
+      source: resolved.source,
+    });
+  }
+
   return json(res, 200, {
     merchantId,
     currency: resolved.currency,
@@ -1168,6 +1227,14 @@ async function handleCreatePaymentLink(req, res) {
   const currencyResolved = normalizeCurrency(currencyInput)
     ? { currency: normalizeCurrency(currencyInput), source: 'request' }
     : await resolveMerchantCurrency(merchantId);
+
+  if (!currencyResolved.currency) {
+    return json(res, 400, {
+      error: 'Currency not configured for this MID',
+      merchantId,
+      source: currencyResolved.source,
+    });
+  }
 
   const token = generatePaymentLinkToken();
   const createdAt = new Date();
