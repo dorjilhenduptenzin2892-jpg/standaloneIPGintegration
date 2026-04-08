@@ -620,6 +620,27 @@ function renderPublicCheckoutPage(baseUrl) {
       font-weight:600;
       cursor:pointer;
     }
+    .secondary{
+      margin-top:12px;
+      width:100%;
+      background:#f0f4f9;
+      color:var(--text);
+      border:1px solid var(--border);
+      border-radius:10px;
+      padding:11px 16px;
+      font-weight:500;
+      cursor:pointer;
+      font-size:14px;
+    }
+    .secondary:hover{background:#e8ecf4}
+    .link-panel{display:none}
+    .link-panel.active{display:block}
+    .link-panel h3{margin:16px 0 8px;font-size:16px}
+    .link-panel p{margin:6px 0;color:var(--muted);font-size:13px}
+    .link-output{display:flex;gap:8px;margin:10px 0}
+    .link-output input{flex:1;font-size:12px;padding:10px}
+    .link-output button{flex:0 0 auto;width:auto;margin-top:0}
+    .tiny{font-size:12px;color:#8a9aad}
     .trust{
       margin-top:16px;
       padding:12px;
@@ -678,22 +699,41 @@ function renderPublicCheckoutPage(baseUrl) {
         <input id="currency" name="currency" type="hidden" value="" />
 
         <button class="submit" type="submit">Proceed to Secure Payment</button>
+        <button class="secondary" type="button" id="generateLinkButton">Generate Payment Link</button>
 
-        <div class="trust">
+        <div class="link-panel" id="paymentLinkPanel">
+          <h3>Shareable payment link</h3>
+          <p>Send this link to the cardholder. Opening it will start the secure Cardzone payment flow.</p>
+          <div class="link-output">
+            <input id="paymentLinkOutput" readonly value="" />
+            <button class="secondary" type="button" id="copyLinkButton">Copy Link</button>
+          </div>
+          <p class="tiny" id="paymentLinkMeta"></p>
+        </div>
+      </form>
           <ul>
             <li><span class="dot"></span><span>Secure payment processing</span></li>
             <li><span class="dot"></span><span>3D Secure authentication</span></li>
             <li><span class="dot"></span><span>Powered by bank payment gateway</span></li>
           </ul>
         </div>
-      </form>
-    </section>
+      </section>
+    </div>
   </div>
   <script>
     (function () {
+      const form = document.getElementById('checkoutForm');
       const midInput = document.getElementById('merchantId');
+      const amountInput = document.getElementById('amount');
+      const customerNameInput = document.getElementById('customerName');
+      const emailInput = document.getElementById('email');
       const currencyLabel = document.getElementById('currencyLabel');
       const currencyInput = document.getElementById('currency');
+      const generateLinkButton = document.getElementById('generateLinkButton');
+      const copyLinkButton = document.getElementById('copyLinkButton');
+      const paymentLinkPanel = document.getElementById('paymentLinkPanel');
+      const paymentLinkOutput = document.getElementById('paymentLinkOutput');
+      const paymentLinkMeta = document.getElementById('paymentLinkMeta');
 
       const currencyCodeToName = {
         '840': 'USD',
@@ -731,7 +771,71 @@ function renderPublicCheckoutPage(baseUrl) {
         }
       }
 
+      async function generatePaymentLink() {
+        const merchantId = (midInput.value || '').trim();
+        const amount = (amountInput.value || '').trim();
+
+        if (!merchantId || !amount) {
+          window.alert('Enter MID and amount first.');
+          return;
+        }
+
+        generateLinkButton.disabled = true;
+        generateLinkButton.textContent = 'Generating...';
+
+        try {
+          await updateCurrency();
+
+          const res = await fetch('/api/payment-links', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              merchantId,
+              amount,
+              currency: currencyInput.value,
+              customerName: (customerNameInput.value || '').trim(),
+              email: (emailInput.value || '').trim()
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok || !data.paymentUrl) {
+            throw new Error(data.error || 'Unable to generate payment link.');
+          }
+
+          paymentLinkOutput.value = data.paymentUrl;
+          paymentLinkMeta.textContent = 'Currency: ' + data.currency + ' ÔÇó Expires: ' + new Date(data.expiresAt).toLocaleString();
+          paymentLinkPanel.classList.add('active');
+        } catch (error) {
+          window.alert(error.message || 'Unable to generate payment link.');
+        } finally {
+          generateLinkButton.disabled = false;
+          generateLinkButton.textContent = 'Generate Payment Link';
+        }
+      }
+
+      async function copyPaymentLink() {
+        const value = paymentLinkOutput.value || '';
+        if (!value) return;
+
+        try {
+          await navigator.clipboard.writeText(value);
+          copyLinkButton.textContent = 'Copied';
+          setTimeout(() => {
+            copyLinkButton.textContent = 'Copy Link';
+          }, 1500);
+        } catch {
+          paymentLinkOutput.focus();
+          paymentLinkOutput.select();
+        }
+      }
+
       midInput.addEventListener('input', updateCurrency);
+      generateLinkButton.addEventListener('click', generatePaymentLink);
+      copyLinkButton.addEventListener('click', copyPaymentLink);
       updateCurrency();
     })();
   </script>
