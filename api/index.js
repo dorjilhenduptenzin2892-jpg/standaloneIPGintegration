@@ -10,6 +10,10 @@ const CARDZONE_REDIRECT_URL =
   process.env.CARDZONE_REDIRECT_URL ||
   process.env.CARDZONE_MERCREQ_URL ||
   'https://3dsecure.bob.bt/3dss/mercReq';
+const CARDZONE_INQUIRY_URL =
+  process.env.CARDZONE_INQUIRY_URL ||
+  process.env.CARDZONE_MERCREQ_URL ||
+  CARDZONE_REDIRECT_URL;
 const CARDZONE_PROFILE_URL = process.env.CARDZONE_PROFILE_URL || '';
 const MERCHANT_CURRENCY_DB_PATH =
   process.env.MERCHANT_CURRENCY_DB_PATH || path.join(process.cwd(), 'data', 'merchant-currency.json');
@@ -379,17 +383,49 @@ function mpiResVerifyString(fields) {
   ].map(v => v || '').join('');
 }
 
-function mapFinalStatus({ hasMac, macVerified, errorCode, approvalCode }) {
-  if (hasMac && !macVerified) return 'VERIFY_FAILED';
-  const ec = String(errorCode || '').trim();
-  const appr = String(approvalCode || '').trim();
-  if (hasMac && macVerified && ec === '000' && appr) return 'SUCCESS';
+function extractFinalResultFields(fields = {}) {
+  return {
+    authorizationCode: String(fields.MPI_APPR_CODE || '').trim(),
+    referenceNumber: String(fields.MPI_RRN || '').trim(),
+    responseCode: String(fields.MPI_ERROR_CODE || '').trim(),
+    responseReason: String(fields.MPI_ERROR_DESC || '').trim(),
+    referralCode: String(fields.MPI_REFERRAL_CODE || '').trim(),
+    bin: String(fields.MPI_BIN || '').trim(),
+  };
+}
+
+function hasSufficientFinalResult(finalResult) {
+  if (!finalResult) return false;
+  return !!(
+    finalResult.responseCode ||
+    finalResult.authorizationCode ||
+    finalResult.referenceNumber ||
+    finalResult.responseReason
+  );
+}
+
+function buildFinalResultRecord({ fields, source, resolvedAt }) {
+  if (!fields || typeof fields !== 'object') return null;
+
+  const extracted = extractFinalResultFields(fields);
+  if (!Object.values(extracted).some(Boolean)) return null;
+
+  return {
+    source,
+    resolvedAt: resolvedAt || new Date().toISOString(),
+    ...extracted,
+  };
+}
+
+function mapFinalPaymentStatus(finalResult) {
+  if (!hasSufficientFinalResult(finalResult)) return 'PENDING';
+  if (finalResult.responseCode === '000' && finalResult.authorizationCode) return 'SUCCESS';
   return 'FAILED';
 }
 
-function mapTransactionLifecycleStatus({ callbackReceived, hasMac, macVerified, errorCode, approvalCode }) {
-  if (!callbackReceived) return 'PENDING';
-  return mapFinalStatus({ hasMac, macVerified, errorCode, approvalCode });
+function mapTransactionLifecycleStatus({ callbackReceived, finalResult }) {
+  if (!callbackReceived && !finalResult) return 'PENDING';
+  return mapFinalPaymentStatus(finalResult);
 }
 
 function txFilePath(txnId) {
@@ -481,6 +517,83 @@ async function doMkReq({ merchantId, purchaseId, merchantPublicKeyBase64Url, mer
   return { requestPayload: payload, responsePayload: data };
 }
 
+function parseCardzoneResponseBody(rawText, contentType = '') {
+  const text = String(rawText || '');
+  const type = String(contentType || '').toLowerCase();
+
+  if (!text.trim()) return {};
+
+  if (type.includes('application/json') || text.trim().startsWith('{') || text.trim().startsWith('[')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
+  }
+
+  if (type.includes('application/x-www-form-urlencoded') || type.includes('text/plain') || text.includes('=')) {
+    return parseForm(text);
+  }
+
+  return {};
+}
+
+async function doInquiry(tx, originalTxnId) {
+  const requestFields = {
+    MPI_TRANS_TYPE: 'INQ',
+    MPI_MERC_ID: tx.merchantId,
+    MPI_ORI_TRXN_ID: originalTxnId,
+  };
+
+  const signInput = mpiReqSignString(requestFields);
+  requestFields.MPI_MAC = signSha256WithRsaBase64Url(signInput, tx.security.merchantPrivateKeyPem);
+
+  console.log('[Cardzone][inquiry] endpoint=', CARDZONE_INQUIRY_URL);
+  console.log('[Cardzone][inquiry] txnId=', originalTxnId);
+
+  const response = await fetch(CARDZONE_INQUIRY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Accept': 'application/json, application/x-www-form-urlencoded, text/plain',
+    },
+    body: new URLSearchParams(requestFields).toString(),
+  });
+
+  const rawBody = await response.text();
+  const responseFields = parseCardzoneResponseBody(rawBody, response.headers.get('content-type') || '');
+
+  if (!response.ok) {
+    throw new Error(`Inquiry failed. HTTP ${response.status}. Body: ${rawBody.slice(0, 500)}`);
+  }
+
+  const hasMac = !!responseFields.MPI_MAC;
+  const verifyInput = hasMac ? mpiResVerifyString(responseFields) : '';
+  const macVerified =
+    hasMac && !!tx.security?.cardzonePublicKeyBase64Url
+      ? verifySha256WithRsaBase64Url(verifyInput, responseFields.MPI_MAC, tx.security.cardzonePublicKeyBase64Url)
+      : false;
+
+  return {
+    requestedAt: new Date().toISOString(),
+    endpoint: CARDZONE_INQUIRY_URL,
+    requestFields,
+    signInput,
+    responseStatus: response.status,
+    responseContentType: response.headers.get('content-type') || '',
+    responseFields,
+    rawBody,
+    macVerification: {
+      hasMac,
+      macVerified,
+      verifyInput,
+      verifyNote: hasMac
+        ? (macVerified ? 'Inquiry MPIRes MAC verified successfully' : 'Inquiry MPIRes MAC verification failed')
+        : 'No MPI_MAC received on inquiry response',
+    },
+  };
+}
+
 function renderAutoPostPage(action, fields) {
   const inputs = Object.entries(fields)
     .filter(([, v]) => v !== undefined && v !== null && v !== '')
@@ -520,6 +633,56 @@ function renderMessagePage(title, message, details) {
     <h1>${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
     ${detailBlock}
+  </div>
+</body>
+</html>`;
+}
+
+function renderResultPage(tx, paymentStatus, finalResult) {
+  const statusTone = paymentStatus === 'SUCCESS' ? '#0f9b63' : paymentStatus === 'FAILED' ? '#c62828' : '#c27a00';
+  const rows = [
+    ['Payment status', paymentStatus],
+    ['Reference number (RRN)', finalResult?.referenceNumber || '—'],
+    ['Authorization code', finalResult?.authorizationCode || '—'],
+    ['Response code', finalResult?.responseCode || '—'],
+    ['Response reason', finalResult?.responseReason || '—'],
+  ].map(([label, value]) => `
+      <div class="row">
+        <div class="label">${escapeHtml(label)}</div>
+        <div class="value">${escapeHtml(value)}</div>
+      </div>`).join('');
+
+  const sourceNote = tx.finalResult?.source
+    ? `<p class="note">Final result source: ${escapeHtml(tx.finalResult.source)}</p>`
+    : '';
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Payment Result</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f5f7fb;padding:24px;color:#111827}
+    .card{max-width:760px;margin:0 auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+    .badge{display:inline-block;padding:8px 12px;border-radius:999px;font-weight:700;color:#fff;background:${statusTone};margin-bottom:18px}
+    .meta{color:#5f6f86;font-size:14px;margin:0 0 16px}
+    .grid{display:grid;gap:12px}
+    .row{display:flex;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fafbfc}
+    .label{font-weight:600;color:#334155}
+    .value{text-align:right;word-break:break-word}
+    .note{margin-top:14px;color:#64748b;font-size:13px}
+    @media (max-width:640px){.row{flex-direction:column}.value{text-align:left}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">${escapeHtml(paymentStatus)}</div>
+    <h1>Payment Result</h1>
+    <p class="meta">Transaction ID: ${escapeHtml(tx.txnId)}${tx.orderRef ? ` • Order Ref: ${escapeHtml(tx.orderRef)}` : ''}</p>
+    <div class="grid">${rows}
+    </div>
+    ${sourceNote}
   </div>
 </body>
 </html>`;
@@ -807,7 +970,7 @@ function renderPublicCheckoutPage(baseUrl) {
           }
 
           paymentLinkOutput.value = data.paymentUrl;
-          paymentLinkMeta.textContent = 'Currency: ' + data.currency + ' ÔÇó Expires: ' + new Date(data.expiresAt).toLocaleString();
+          paymentLinkMeta.textContent = 'Currency: ' + data.currency + ' +�+�+� Expires: ' + new Date(data.expiresAt).toLocaleString();
           paymentLinkPanel.classList.add('active');
         } catch (error) {
           window.alert(error.message || 'Unable to generate payment link.');
@@ -1002,6 +1165,8 @@ async function handleInitiate(req, res) {
       signInput: mpiReqSignInput,
     },
     callback: null,
+    inquiry: null,
+    finalResult: null,
     macVerification: null,
     status: 'REDIRECTED_TO_HOSTED_PAGE',
   };
@@ -1038,14 +1203,6 @@ async function handleCallback(req, res) {
       ? verifySha256WithRsaBase64Url(verifyInput, fields.MPI_MAC, tx.security.cardzonePublicKeyBase64Url)
       : false;
 
-  const finalStatus = mapTransactionLifecycleStatus({
-    callbackReceived: true,
-    hasMac,
-    macVerified,
-    errorCode: fields.MPI_ERROR_CODE,
-    approvalCode: fields.MPI_APPR_CODE,
-  });
-
   console.log('MPI_ERROR_CODE:', fields.MPI_ERROR_CODE || '');
   console.log('MPI_ERROR_DESC:', fields.MPI_ERROR_DESC || '');
   console.log('MPI_APPR_CODE:', fields.MPI_APPR_CODE || '');
@@ -1068,6 +1225,45 @@ async function handleCallback(req, res) {
     verifyInput,
     verifyNote: hasMac ? (macVerified ? 'MPIRes MAC verified successfully' : 'MPIRes MAC verification failed') : 'No MPI_MAC received',
   };
+  const callbackResultTrusted = !hasMac || macVerified;
+  let finalResult = callbackResultTrusted
+    ? buildFinalResultRecord({
+        fields,
+        source: 'callback',
+        resolvedAt: tx.callback.receivedAt,
+      })
+    : null;
+
+  if (!callbackResultTrusted || !hasSufficientFinalResult(finalResult)) {
+    try {
+      const inquiry = await doInquiry(tx, txnId);
+      tx.inquiry = inquiry;
+
+      const inquiryResult = buildFinalResultRecord({
+        fields: inquiry.responseFields,
+        source: 'inquiry',
+        resolvedAt: inquiry.requestedAt,
+      });
+      const inquiryResultTrusted = !inquiry.macVerification?.hasMac || inquiry.macVerification.macVerified;
+
+      if (inquiryResultTrusted && hasSufficientFinalResult(inquiryResult)) {
+        finalResult = inquiryResult;
+      }
+    } catch (error) {
+      tx.inquiry = {
+        requestedAt: new Date().toISOString(),
+        endpoint: CARDZONE_INQUIRY_URL,
+        error: error.message,
+      };
+      console.error('[Cardzone][inquiry] failed for txn', txnId, error.message);
+    }
+  }
+
+  tx.finalResult = finalResult;
+  const finalStatus = mapTransactionLifecycleStatus({
+    callbackReceived: true,
+    finalResult,
+  });
   tx.status = finalStatus;
   tx.updatedAt = new Date().toISOString();
 
@@ -1082,6 +1278,7 @@ async function handleCallback(req, res) {
       txnId,
       status: finalStatus,
       macVerified,
+      finalResultSource: finalResult?.source || null,
     })
   );
 }
@@ -1115,12 +1312,60 @@ async function handleReturn(req, res) {
   }
 
   const callbackReceived = !!tx.callback;
+  const callbackResultTrusted = !tx.macVerification?.hasMac || !!tx.macVerification?.macVerified;
+  let finalResult = tx.finalResult;
+
+  if (finalResult?.source === 'callback' && !callbackResultTrusted) {
+    finalResult = null;
+  }
+
+  if (!finalResult && callbackResultTrusted) {
+    finalResult = buildFinalResultRecord({
+      fields: tx.callback?.fields,
+      source: 'callback',
+      resolvedAt: tx.callback?.receivedAt,
+    });
+  }
+
+  if (callbackReceived && (!callbackResultTrusted || !hasSufficientFinalResult(finalResult))) {
+    try {
+      const inquiry = await doInquiry(tx, tx.txnId);
+      tx.inquiry = inquiry;
+
+      const inquiryResult = buildFinalResultRecord({
+        fields: inquiry.responseFields,
+        source: 'inquiry',
+        resolvedAt: inquiry.requestedAt,
+      });
+      const inquiryResultTrusted = !inquiry.macVerification?.hasMac || inquiry.macVerification.macVerified;
+
+      if (inquiryResultTrusted && hasSufficientFinalResult(inquiryResult)) {
+        finalResult = inquiryResult;
+        tx.finalResult = inquiryResult;
+        tx.status = mapTransactionLifecycleStatus({
+          callbackReceived,
+          finalResult: inquiryResult,
+        });
+        tx.updatedAt = new Date().toISOString();
+        await saveTransaction(tx);
+      }
+    } catch (error) {
+      if (!tx.inquiry?.error) {
+        tx.inquiry = {
+          requestedAt: new Date().toISOString(),
+          endpoint: CARDZONE_INQUIRY_URL,
+          error: error.message,
+        };
+        tx.updatedAt = new Date().toISOString();
+        await saveTransaction(tx);
+      }
+      console.error('[Cardzone][return][inquiry] failed for txn', tx.txnId, error.message);
+    }
+  }
+
   const effectiveStatus = mapTransactionLifecycleStatus({
     callbackReceived,
-    hasMac: !!tx.callback?.fields?.MPI_MAC,
-    macVerified: !!tx.macVerification?.macVerified,
-    errorCode: tx.callback?.fields?.MPI_ERROR_CODE,
-    approvalCode: tx.callback?.fields?.MPI_APPR_CODE,
+    finalResult,
   });
   const hasFinalState = effectiveStatus !== 'PENDING';
 
@@ -1140,38 +1385,7 @@ async function handleReturn(req, res) {
     );
   }
 
-  return html(
-    res,
-    200,
-    renderMessagePage(
-      `Payment Result: ${effectiveStatus}`,
-      tx.macVerification?.macVerified && effectiveStatus === 'FAILED'
-        ? 'Integration succeeded, but the transaction was declined by Cardzone/host.'
-        : 'Payment status resolved from backend transaction record.',
-      {
-        integrationStatus: tx.macVerification?.macVerified
-          ? 'INTEGRATION_SUCCESS'
-          : effectiveStatus === 'VERIFY_FAILED'
-            ? 'INTEGRATION_VERIFY_FAILED'
-            : 'INTEGRATION_PENDING_OR_NOT_VERIFIED',
-        txnId: tx.txnId,
-        status: effectiveStatus,
-        amountMinor: tx.amountMinor,
-        currency: tx.currency,
-        orderRef: tx.orderRef,
-        merchantId: tx.merchantId,
-        callbackReceived,
-        macVerified: tx.macVerification?.macVerified ?? null,
-        MPI_ERROR_CODE: tx.callback?.fields?.MPI_ERROR_CODE || null,
-        MPI_ERROR_DESC: tx.callback?.fields?.MPI_ERROR_DESC || null,
-        MPI_APPR_CODE: tx.callback?.fields?.MPI_APPR_CODE || null,
-        MPI_RRN: tx.callback?.fields?.MPI_RRN || null,
-        MPI_REFERRAL_CODE: tx.callback?.fields?.MPI_REFERRAL_CODE || null,
-        MPI_BIN: tx.callback?.fields?.MPI_BIN || null,
-        allResponseFields: tx.callback?.rawResponseFields || tx.callback?.fields || {},
-      }
-    )
-  );
+  return html(res, 200, renderResultPage(tx, effectiveStatus, finalResult));
 }
 
 async function handleTxDebug(req, res, txnId) {
@@ -1187,7 +1401,10 @@ async function handleTxDebug(req, res, txnId) {
     txnId: tx.txnId,
     status: tx.status,
     callbackReceived: !!tx.callback,
-    mpiErrorCode: tx.callback?.fields?.MPI_ERROR_CODE || null,
+    mpiErrorCode: tx.finalResult?.responseCode || tx.callback?.fields?.MPI_ERROR_CODE || null,
+    mpiApprovalCode: tx.finalResult?.authorizationCode || tx.callback?.fields?.MPI_APPR_CODE || null,
+    mpiRrn: tx.finalResult?.referenceNumber || tx.callback?.fields?.MPI_RRN || null,
+    finalResultSource: tx.finalResult?.source || null,
     macVerified: tx.macVerification?.macVerified ?? null,
   });
 }
