@@ -695,6 +695,11 @@ function renderPublicCheckoutPage(baseUrl) {
       const currencyLabel = document.getElementById('currencyLabel');
       const currencyInput = document.getElementById('currency');
 
+      const currencyCodeToName = {
+        '840': 'USD',
+        '356': 'INR'
+      };
+
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
         if (!merchantId) {
@@ -718,7 +723,8 @@ function renderPublicCheckoutPage(baseUrl) {
           const data = await res.json();
           const code = (data && data.currency) ? String(data.currency) : '';
           currencyInput.value = code;
-          currencyLabel.textContent = code || '';
+          const displayName = currencyCodeToName[code] || code;
+          currencyLabel.textContent = displayName || '';
         } catch {
           currencyInput.value = '';
           currencyLabel.textContent = '';
