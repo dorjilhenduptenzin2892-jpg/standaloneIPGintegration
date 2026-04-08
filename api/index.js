@@ -667,6 +667,11 @@ function renderPublicCheckoutPage(baseUrl) {
               <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
             </div>
 
+            <div class="field">
+              <label for="currencyDisplay">Currency</label>
+              <input id="currencyDisplay" readonly placeholder="" value="" />
+            </div>
+
             <input id="currency" name="currency" type="hidden" value="" />
 
             <div class="field">
@@ -679,10 +684,6 @@ function renderPublicCheckoutPage(baseUrl) {
               <input id="email" name="email" type="email" placeholder="Optional" />
             </div>
 
-            <div class="field full">
-              <label for="mobilePhone">Mobile Number</label>
-              <input id="mobilePhone" name="mobilePhone" placeholder="Optional" />
-            </div>
           </div>
 
           <div class="button-row">
@@ -710,19 +711,19 @@ function renderPublicCheckoutPage(baseUrl) {
       const amountInput = document.getElementById('amount');
       const customerNameInput = document.getElementById('customerName');
       const emailInput = document.getElementById('email');
-      const mobilePhoneInput = document.getElementById('mobilePhone');
+      const currencyDisplay = document.getElementById('currencyDisplay');
       const currencyInput = document.getElementById('currency');
       const generateLinkButton = document.getElementById('generateLinkButton');
       const copyLinkButton = document.getElementById('copyLinkButton');
       const paymentLinkPanel = document.getElementById('paymentLinkPanel');
       const paymentLinkOutput = document.getElementById('paymentLinkOutput');
       const paymentLinkMeta = document.getElementById('paymentLinkMeta');
-      let timer = null;
 
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
         if (!merchantId) {
           currencyInput.value = '';
+          currencyDisplay.value = '';
           return;
         }
 
@@ -734,20 +735,18 @@ function renderPublicCheckoutPage(baseUrl) {
 
           if (!res.ok) {
             currencyInput.value = '';
+            currencyDisplay.value = '';
             return;
           }
 
           const data = await res.json();
           const code = (data && data.currency) ? String(data.currency) : '';
           currencyInput.value = code;
+          currencyDisplay.value = code;
         } catch {
           currencyInput.value = '';
+          currencyDisplay.value = '';
         }
-      }
-
-      function debouncedUpdate() {
-        clearTimeout(timer);
-        timer = setTimeout(updateCurrency, 350);
       }
 
       async function generatePaymentLink() {
@@ -780,8 +779,7 @@ function renderPublicCheckoutPage(baseUrl) {
               amount,
               currency: currencyInput.value,
               customerName: (customerNameInput.value || '').trim(),
-              email: (emailInput.value || '').trim(),
-              mobilePhone: (mobilePhoneInput.value || '').trim()
+              email: (emailInput.value || '').trim()
             })
           });
 
@@ -817,7 +815,7 @@ function renderPublicCheckoutPage(baseUrl) {
         }
       }
 
-      midInput.addEventListener('input', debouncedUpdate);
+      midInput.addEventListener('input', updateCurrency);
       generateLinkButton.addEventListener('click', generatePaymentLink);
       copyLinkButton.addEventListener('click', copyPaymentLink);
       updateCurrency();
