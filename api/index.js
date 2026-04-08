@@ -670,7 +670,7 @@ function renderPublicCheckoutPage(baseUrl) {
 
           <div class="field">
             <label for="merchantId">Merchant ID</label>
-            <input id="merchantId" name="merchantId" required placeholder="Enter registered MID" value="${escapeHtml(MERCHANT_ID_DEFAULT)}" />
+            <input id="merchantId" name="merchantId" required placeholder="Enter registered MID" />
           </div>
 
           <div class="field" style="position:relative">
