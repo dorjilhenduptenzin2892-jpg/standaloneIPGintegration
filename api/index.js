@@ -1271,16 +1271,23 @@ async function handleCallback(req, res) {
 
   console.log('[Cardzone][callback] txnId=', txnId, 'status=', finalStatus, 'macVerified=', macVerified);
 
-  return html(
-    res,
-    200,
-    renderMessagePage('Payment callback received', 'Callback processed successfully.', {
-      txnId,
-      status: finalStatus,
-      macVerified,
-      finalResultSource: finalResult?.source || null,
-    })
-  );
+  if (finalStatus === 'PENDING') {
+    return html(
+      res,
+      202,
+      renderMessagePage(
+        'Payment processing',
+        'Payment is still processing. Please wait or refresh.',
+        {
+          txnId,
+          status: finalStatus,
+          callbackReceived: true,
+        }
+      )
+    );
+  }
+
+  return html(res, 200, renderResultPage(tx, finalStatus, finalResult));
 }
 
 async function handleReturn(req, res) {
