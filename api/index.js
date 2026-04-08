@@ -653,11 +653,6 @@ function renderPublicCheckoutPage(baseUrl) {
           </div>
 
           <div class="field">
-            <label for="businessName">Business Name</label>
-            <input id="businessName" name="businessName" placeholder="Enter business name" />
-          </div>
-
-          <div class="field">
             <label for="amount">Amount</label>
             <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
           </div>
@@ -665,11 +660,6 @@ function renderPublicCheckoutPage(baseUrl) {
           <div class="field">
             <label for="currencyDisplay">Currency</label>
             <input id="currencyDisplay" readonly placeholder="" value="" />
-          </div>
-
-          <div class="field full">
-            <label for="referenceNumber">Reference Number</label>
-            <input id="referenceNumber" name="orderRef" placeholder="Enter reference number" />
           </div>
 
           <div class="section-label">Customer Details</div>
