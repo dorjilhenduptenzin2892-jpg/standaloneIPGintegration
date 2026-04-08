@@ -14,12 +14,14 @@ const CARDZONE_PROFILE_URL = process.env.CARDZONE_PROFILE_URL || '';
 const DEFAULT_CURRENCY = '356'; // INR - Indian Rupee
 const ENABLE_MKREQ_MAC = process.env.ENABLE_MKREQ_MAC === 'true';
 const TEMP_DIR = process.env.VERCEL ? '/tmp' : path.join(os.tmpdir(), 'cardzone-backend');
+const PAYMENT_LINK_TTL_MS = Number(process.env.PAYMENT_LINK_TTL_MS || 7 * 24 * 60 * 60 * 1000);
 
 const txStore = new Map();
 
 function getRequestBaseUrl(req) {
   if (process.env.CALLBACK_BASE_URL) return process.env.CALLBACK_BASE_URL;
-  const proto = (req.headers['x-forwarded-proto'] || 'https').toString().split(',')[0].trim();
+  const fallbackProto = req.socket?.encrypted ? 'https' : 'http';
+  const proto = (req.headers['x-forwarded-proto'] || fallbackProto).toString().split(',')[0].trim();
   const host = (req.headers['x-forwarded-host'] || req.headers.host || '').toString().split(',')[0].trim();
   return `${proto}://${host}`;
 }
@@ -365,6 +367,11 @@ function txFilePath(txnId) {
   return path.join(TEMP_DIR, `txn_${safeId}.json`);
 }
 
+function paymentLinkFilePath(token) {
+  const safeToken = String(token || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  return path.join(TEMP_DIR, `paylink_${safeToken}.json`);
+}
+
 async function saveTransaction(tx) {
   txStore.set(tx.txnId, tx);
   await fs.mkdir(TEMP_DIR, { recursive: true });
@@ -386,6 +393,27 @@ async function getTransaction(txnId) {
   } catch {
     return null;
   }
+}
+
+async function savePaymentLink(link) {
+  await fs.mkdir(TEMP_DIR, { recursive: true });
+  await fs.writeFile(paymentLinkFilePath(link.token), JSON.stringify(link, null, 2), 'utf8');
+}
+
+async function getPaymentLink(token) {
+  const id = String(token || '').trim();
+  if (!id) return null;
+
+  try {
+    const content = await fs.readFile(paymentLinkFilePath(id), 'utf8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+function generatePaymentLinkToken() {
+  return crypto.randomBytes(18).toString('base64url');
 }
 
 async function doMkReq({ merchantId, purchaseId, merchantPublicKeyBase64Url, merchantPrivateKeyPem }) {
@@ -552,13 +580,32 @@ function renderPublicCheckoutPage(baseUrl) {
       font-weight:600;
       cursor:pointer;
     }
+    .button-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+    .secondary{
+      width:100%;
+      background:transparent;
+      color:#d8e5ff;
+      border:1px solid #365388;
+      border-radius:12px;
+      padding:13px 16px;
+      font-weight:600;
+      cursor:pointer;
+    }
     .list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:10px}
     .list li{display:flex;gap:10px;color:#d4def3;font-size:14px}
     .dot{height:10px;width:10px;border-radius:999px;background:var(--ok);margin-top:4px;flex:none}
     .meta{margin-top:14px;font-size:12px;color:#8ea0c4}
+    .link-panel{display:none;margin-top:16px;padding:14px;border-radius:14px;border:1px solid #2b4169;background:#0c1526}
+    .link-panel.active{display:block}
+    .link-panel h3{margin:0 0 8px;font-size:15px}
+    .link-panel p{margin:0 0 12px;font-size:13px}
+    .link-output{display:grid;grid-template-columns:1fr auto;gap:10px}
+    .link-output input{font-size:13px}
+    .tiny{font-size:12px;color:#8ea0c4}
     @media (max-width:900px){
       .hero{grid-template-columns:1fr}
       .form-grid{grid-template-columns:1fr}
+      .button-row,.link-output{grid-template-columns:1fr}
     }
   </style>
 </head>
@@ -578,7 +625,7 @@ function renderPublicCheckoutPage(baseUrl) {
       </section>
 
       <section class="card">
-        <form method="post" action="/api/initiate" autocomplete="on">
+        <form id="checkoutForm" method="post" action="/api/initiate" autocomplete="on">
           <div class="form-grid">
             <div class="field full">
               <label for="merchantId">Merchant ID (MID) *</label>
@@ -608,15 +655,38 @@ function renderPublicCheckoutPage(baseUrl) {
             </div>
           </div>
 
-          <button class="submit" type="submit">Proceed to Secure Payment</button>
+          <div class="button-row">
+            <button class="submit" type="submit">Proceed to Secure Payment</button>
+            <button class="secondary" type="button" id="generateLinkButton">Generate Payment Link</button>
+          </div>
+
+          <div class="link-panel" id="paymentLinkPanel">
+            <h3>Shareable payment link</h3>
+            <p>Send this link to the cardholder. Opening it will start the secure Cardzone payment flow.</p>
+            <div class="link-output">
+              <input id="paymentLinkOutput" readonly value="" />
+              <button class="secondary" type="button" id="copyLinkButton">Copy Link</button>
+            </div>
+            <p class="tiny" id="paymentLinkMeta"></p>
+          </div>
         </form>
       </section>
     </div>
   </div>
   <script>
     (function () {
+      const form = document.getElementById('checkoutForm');
       const midInput = document.getElementById('merchantId');
+      const amountInput = document.getElementById('amount');
+      const customerNameInput = document.getElementById('customerName');
+      const emailInput = document.getElementById('email');
+      const mobilePhoneInput = document.getElementById('mobilePhone');
       const currencyInput = document.getElementById('currency');
+      const generateLinkButton = document.getElementById('generateLinkButton');
+      const copyLinkButton = document.getElementById('copyLinkButton');
+      const paymentLinkPanel = document.getElementById('paymentLinkPanel');
+      const paymentLinkOutput = document.getElementById('paymentLinkOutput');
+      const paymentLinkMeta = document.getElementById('paymentLinkMeta');
       let timer = null;
 
       async function updateCurrency() {
@@ -645,7 +715,72 @@ function renderPublicCheckoutPage(baseUrl) {
         timer = setTimeout(updateCurrency, 350);
       }
 
+      async function generatePaymentLink() {
+        const merchantId = (midInput.value || '').trim();
+        const amount = (amountInput.value || '').trim();
+
+        if (!merchantId || !amount) {
+          window.alert('Enter MID and amount first.');
+          return;
+        }
+
+        generateLinkButton.disabled = true;
+        generateLinkButton.textContent = 'Generating...';
+
+        try {
+          await updateCurrency();
+
+          const res = await fetch('/api/payment-links', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              merchantId,
+              amount,
+              currency: currencyInput.value,
+              customerName: (customerNameInput.value || '').trim(),
+              email: (emailInput.value || '').trim(),
+              mobilePhone: (mobilePhoneInput.value || '').trim()
+            })
+          });
+
+          const data = await res.json();
+          if (!res.ok || !data.paymentUrl) {
+            throw new Error(data.error || 'Unable to generate payment link.');
+          }
+
+          paymentLinkOutput.value = data.paymentUrl;
+          paymentLinkMeta.textContent = 'Currency: ' + data.currency + ' • Expires: ' + new Date(data.expiresAt).toLocaleString();
+          paymentLinkPanel.classList.add('active');
+        } catch (error) {
+          window.alert(error.message || 'Unable to generate payment link.');
+        } finally {
+          generateLinkButton.disabled = false;
+          generateLinkButton.textContent = 'Generate Payment Link';
+        }
+      }
+
+      async function copyPaymentLink() {
+        const value = paymentLinkOutput.value || '';
+        if (!value) return;
+
+        try {
+          await navigator.clipboard.writeText(value);
+          copyLinkButton.textContent = 'Copied';
+          setTimeout(() => {
+            copyLinkButton.textContent = 'Copy Link';
+          }, 1500);
+        } catch {
+          paymentLinkOutput.focus();
+          paymentLinkOutput.select();
+        }
+      }
+
       midInput.addEventListener('input', debouncedUpdate);
+      generateLinkButton.addEventListener('click', generatePaymentLink);
+      copyLinkButton.addEventListener('click', copyPaymentLink);
       updateCurrency();
     })();
   </script>
@@ -1008,6 +1143,82 @@ async function handleMerchantCurrency(req, res) {
   });
 }
 
+async function handleCreatePaymentLink(req, res) {
+  const raw = await parseBody(req);
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  const input = parseRawPayload(raw, contentType);
+
+  const merchantId = String(input.merchantId || '').trim();
+  const amount = String(input.amount || '').trim();
+  const customerName = String(input.customerName || '').trim();
+  const email = String(input.email || '').trim();
+  const mobilePhone = String(input.mobilePhone || '').trim();
+
+  if (!merchantId || !amount) {
+    return json(res, 400, { error: 'merchantId and amount are required' });
+  }
+
+  try {
+    amountToMinorUnits(amount);
+  } catch (error) {
+    return json(res, 400, { error: error.message });
+  }
+
+  const currencyInput = String(input.currency || '').trim();
+  const currencyResolved = normalizeCurrency(currencyInput)
+    ? { currency: normalizeCurrency(currencyInput), source: 'request' }
+    : await resolveMerchantCurrency(merchantId);
+
+  const token = generatePaymentLinkToken();
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + PAYMENT_LINK_TTL_MS);
+  const baseUrl = getRequestBaseUrl(req);
+
+  await savePaymentLink({
+    token,
+    merchantId,
+    amount,
+    currency: currencyResolved.currency,
+    customerName,
+    email,
+    mobilePhone,
+    createdAt: createdAt.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  });
+
+  return json(res, 200, {
+    token,
+    paymentUrl: `${baseUrl}/pay/${encodeURIComponent(token)}`,
+    currency: currencyResolved.currency,
+    currencySource: currencyResolved.source,
+    expiresAt: expiresAt.toISOString(),
+  });
+}
+
+async function handlePaymentLinkLanding(req, res, token) {
+  const paymentLink = await getPaymentLink(token);
+  if (!paymentLink) {
+    return html(res, 404, renderMessagePage('Payment link not found', 'This payment link does not exist or is no longer available.'));
+  }
+
+  if (paymentLink.expiresAt && Date.parse(paymentLink.expiresAt) < Date.now()) {
+    return html(res, 410, renderMessagePage('Payment link expired', 'This payment link has expired. Please request a new one.'));
+  }
+
+  return html(
+    res,
+    200,
+    renderAutoPostPage('/api/initiate', {
+      merchantId: paymentLink.merchantId,
+      amount: paymentLink.amount,
+      currency: paymentLink.currency,
+      customerName: paymentLink.customerName,
+      email: paymentLink.email,
+      mobilePhone: paymentLink.mobilePhone,
+    })
+  );
+}
+
 function handleHealth(req, res) {
   return json(res, 200, {
     ok: true,
@@ -1038,8 +1249,18 @@ module.exports = async function handler(req, res) {
       return await handleInitiate(req, res);
     }
 
+    if (req.method === 'POST' && (u.pathname === '/api/payment-links' || u.pathname === '/payment-links')) {
+      return await handleCreatePaymentLink(req, res);
+    }
+
     if (req.method === 'GET' && (u.pathname === '/api/merchant-currency' || u.pathname === '/merchant-currency')) {
       return await handleMerchantCurrency(req, res);
+    }
+
+    if (req.method === 'GET' && u.pathname.startsWith('/pay/')) {
+      const parts = u.pathname.split('/').filter(Boolean);
+      const token = parts[parts.length - 1] || '';
+      return await handlePaymentLinkLanding(req, res, token);
     }
 
     if (req.method === 'GET' && (u.pathname === '/callback' || u.pathname === '/api/callback')) {
