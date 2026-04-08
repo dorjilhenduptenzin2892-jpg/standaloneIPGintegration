@@ -388,7 +388,7 @@ function extractFinalResultFields(fields = {}) {
     authorizationCode: String(fields.MPI_APPR_CODE || '').trim(),
     referenceNumber: String(fields.MPI_RRN || '').trim(),
     responseCode: String(fields.MPI_ERROR_CODE || '').trim(),
-    responseReason: String(fields.MPI_ERROR_DESC || '').trim(),
+    responseReason: String(fields.MPI_ERROR_DESC || fields.MPI_CARDHOLDER_INFO || '').trim(),
     referralCode: String(fields.MPI_REFERRAL_CODE || '').trim(),
     bin: String(fields.MPI_BIN || '').trim(),
   };
@@ -640,11 +640,17 @@ function renderMessagePage(title, message, details) {
 
 function renderResultPage(tx, paymentStatus, finalResult) {
   const statusTone = paymentStatus === 'SUCCESS' ? '#0f9b63' : paymentStatus === 'FAILED' ? '#c62828' : '#c27a00';
+  const responseCode = finalResult?.responseCode || '';
+  const responseReason = finalResult?.responseReason || '';
+  const responseSummary = responseCode && responseReason
+    ? `${responseCode} - ${responseReason}`
+    : (responseCode || responseReason || '—');
+
   const rows = [
     ['Payment status', paymentStatus],
     ['Reference number (RRN)', finalResult?.referenceNumber || '—'],
     ['Authorization code', finalResult?.authorizationCode || '—'],
-    ['Response code', finalResult?.responseCode || '—'],
+    ['Response code', responseSummary],
     ['Response reason', finalResult?.responseReason || '—'],
   ].map(([label, value]) => `
       <div class="row">
@@ -663,14 +669,18 @@ function renderResultPage(tx, paymentStatus, finalResult) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Payment Result</title>
   <style>
-    body{font-family:Arial,sans-serif;background:#f5f7fb;padding:24px;color:#111827}
-    .card{max-width:760px;margin:0 auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
-    .badge{display:inline-block;padding:8px 12px;border-radius:999px;font-weight:700;color:#fff;background:${statusTone};margin-bottom:18px}
-    .meta{color:#5f6f86;font-size:14px;margin:0 0 16px}
+    body{font-family:Arial,sans-serif;background:linear-gradient(180deg,#f8fbff 0%,#eef3fb 100%);padding:24px;color:#111827}
+    .card{max-width:760px;margin:0 auto;background:#fff;padding:26px;border-radius:18px;box-shadow:0 18px 40px rgba(15,23,42,.10);border:1px solid #e7edf8}
+    .badge{display:inline-block;padding:8px 12px;border-radius:999px;font-weight:700;color:#fff;background:${statusTone};margin-bottom:14px}
+    h1{margin:0 0 8px;font-size:30px}
+    .meta{color:#5f6f86;font-size:14px;margin:0 0 18px}
     .grid{display:grid;gap:12px}
-    .row{display:flex;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fafbfc}
+    .row{display:flex;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid #e5e7eb;border-radius:12px;background:#fafcff}
     .label{font-weight:600;color:#334155}
     .value{text-align:right;word-break:break-word}
+    .actions{margin-top:18px;display:flex;justify-content:flex-end}
+    .home-btn{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:10px;background:#165dff;color:#fff;text-decoration:none;font-weight:600;box-shadow:0 6px 14px rgba(22,93,255,.25)}
+    .home-btn:hover{background:#0f4ed8}
     .note{margin-top:14px;color:#64748b;font-size:13px}
     @media (max-width:640px){.row{flex-direction:column}.value{text-align:left}}
   </style>
@@ -683,6 +693,9 @@ function renderResultPage(tx, paymentStatus, finalResult) {
     <div class="grid">${rows}
     </div>
     ${sourceNote}
+    <div class="actions">
+      <a class="home-btn" href="https://standalone-ip-gintegration.vercel.app/">Back to Home</a>
+    </div>
   </div>
 </body>
 </html>`;
