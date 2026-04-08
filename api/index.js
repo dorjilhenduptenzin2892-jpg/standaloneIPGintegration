@@ -653,7 +653,7 @@ function renderPublicCheckoutPage(baseUrl) {
           </div>
 
           <div class="field" style="position:relative">
-            <label for="amount">Amount <span id="currencyLabel" style="font-weight:400;color:#5f6f86"></span></label>
+            <label for="amount"><span id="currencyLabel" style="font-weight:600"></span> Amount</label>
             <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
           </div>
 
@@ -718,7 +718,7 @@ function renderPublicCheckoutPage(baseUrl) {
           const data = await res.json();
           const code = (data && data.currency) ? String(data.currency) : '';
           currencyInput.value = code;
-          currencyLabel.textContent = code ? '(' + code + ')' : '';
+          currencyLabel.textContent = code || '';
         } catch {
           currencyInput.value = '';
           currencyLabel.textContent = '';
