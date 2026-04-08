@@ -652,14 +652,9 @@ function renderPublicCheckoutPage(baseUrl) {
             <input id="merchantId" name="merchantId" required placeholder="Enter registered MID" value="${escapeHtml(MERCHANT_ID_DEFAULT)}" />
           </div>
 
-          <div class="field">
-            <label for="amount">Amount</label>
+          <div class="field" style="position:relative">
+            <label for="amount">Amount <span id="currencyLabel" style="font-weight:400;color:#5f6f86"></span></label>
             <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
-          </div>
-
-          <div class="field">
-            <label for="currencyDisplay">Currency</label>
-            <input id="currencyDisplay" readonly placeholder="" value="" />
           </div>
 
           <div class="section-label">Customer Details</div>
@@ -697,14 +692,14 @@ function renderPublicCheckoutPage(baseUrl) {
   <script>
     (function () {
       const midInput = document.getElementById('merchantId');
-      const currencyDisplay = document.getElementById('currencyDisplay');
+      const currencyLabel = document.getElementById('currencyLabel');
       const currencyInput = document.getElementById('currency');
 
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
         if (!merchantId) {
           currencyInput.value = '';
-          currencyDisplay.value = '';
+          currencyLabel.textContent = '';
           return;
         }
 
@@ -716,17 +711,17 @@ function renderPublicCheckoutPage(baseUrl) {
 
           if (!res.ok) {
             currencyInput.value = '';
-            currencyDisplay.value = '';
+            currencyLabel.textContent = '';
             return;
           }
 
           const data = await res.json();
           const code = (data && data.currency) ? String(data.currency) : '';
           currencyInput.value = code;
-          currencyDisplay.value = code;
+          currencyLabel.textContent = code ? '(' + code + ')' : '';
         } catch {
           currencyInput.value = '';
-          currencyDisplay.value = '';
+          currencyLabel.textContent = '';
         }
       }
 
