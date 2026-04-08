@@ -383,6 +383,144 @@ function mpiResVerifyString(fields) {
   ].map(v => v || '').join('');
 }
 
+const RESPONSE_CODE_DESCRIPTIONS = {
+  '0': 'APPROVED',
+  '00': 'APPROVED',
+  '00_NR': 'APPROVED NO RECEIPT',
+  '00_NRR': 'APPROVED NO RECEIPT REQ',
+  '1': 'REFER TO CARD ISSUER',
+  '2': 'REFER TO CARD ISSUER SPECIAL CONDITION',
+  '3': 'INVALID MERCHANT',
+  '4': 'PICK UP CARD',
+  '5': 'DO NOT HONOUR',
+  '6': 'CHECK VALUE ERROR',
+  '8': 'SIGNATURE REQUIRED',
+  '10': 'APPROVED PARTIAL AMT',
+  '11': 'APPROVED VIP',
+  '12': 'INVALID TRXN',
+  '13': 'INVALID AMT',
+  '14': 'INVALID CARD NUMBER',
+  '19': 'REENTER TRXN',
+  '20': 'AMOUNT_MISSMATCH',
+  '22': 'MPS NO CHEQUE ACC',
+  '23': 'MPS NO SAVING ACC',
+  '24': 'MPS NO CREDIT ACC',
+  '25': 'UNABLE TO LOCATE RECORD ON FILE',
+  '30': 'FORMAT ERROR',
+  '31': 'BANK NOT SUPPORTED BY SWITCH',
+  '34': 'FRAUD CARD',
+  '39': 'NO CREDIT ACCOUNT',
+  '40': 'FUNCTION NOT SUPPORTED BY ISSUER',
+  '41': 'LOST CARD',
+  '43': 'STOLEN CARD',
+  '44': 'BLOCK TERMINATE CLOSE DESTROY CARD',
+  '45': 'NEW UNACTIVATED CARD',
+  '46': 'CLOSED CARD ACCT',
+  '51': 'INSUFFICIENT FUNDS',
+  '52': 'NO CURRENT ACCOUNT',
+  '53': 'NO SAVING ACCOUNT',
+  '54': 'EXPIRED CARD',
+  '55': 'INCORRECT PIN',
+  '56': 'NO CARD RECORD',
+  '57': 'TRXN NOT PERMITTED TO CARD',
+  '58': 'TRXN NOT PERMITTED TO TERMINAL',
+  '59': 'SUSPECTED FRAUD',
+  '5C': 'NOT SUPPORTED BY ISSUER',
+  '61': 'EXCEED AMT LMT',
+  '62': 'RESTRICTED CARD',
+  '63': 'MPS MAC VER ERROR',
+  '65': 'EXCEED CNT LMT',
+  '68': 'ISSUER TIMEOUT',
+  '72': 'UNACTIVATED ACCOUNT',
+  '75': 'PIN TRY EXCEEDED',
+  '76': 'INVALID PROD CODE',
+  '77': 'RECONCILE ERROR OR HOST TEXT IF SENT',
+  '78': 'UNACTIVATED/BLOCK CARD',
+  '79': 'DECLINED',
+  '80': 'BATCH NUMBER NOT FOUND',
+  '82': 'NEGATIVE ONLINE CAM/CVV RESULTS',
+  '83': 'ISSUER BLOCKED DUE TO SECURITY REASON',
+  '84': 'VALIDATE ARQC ERROR',
+  '85': 'NOT DECLINED',
+  '86': 'CANNOT VERIFY PIN',
+  '87': 'PIN REQUIRED',
+  '88': 'CRYPTO FAILED',
+  '89': 'BAD TERMINAL ID',
+  '91': 'ISSUER OR SWITCH IS INOPERATIVE',
+  '92': 'ROUTING ERROR',
+  '93': 'CARD VIOLATION CANNOT COMPLETE',
+  '94': 'DUPLICATE TRXN',
+  '95': 'RECONCILE ERROR',
+  '96': 'SYSTEM MALFUNCTION',
+  '97': 'ACCOUNT CURRENCY ERROR',
+  '98': 'CUP ISSUER TIMEOUT',
+  '99': 'PIN BLOCK ERROR',
+  '9G': 'BLOCKED BY CARDHOLDER',
+  'A0': 'MAC VER ERROR',
+  'A1': 'VEHICLE AND DRIVER MISMATCH',
+  'A2': 'PIN MANDOTORY',
+  'A3': 'VELOCITY EXCEEDED',
+  'A4': 'ACQUIRER TIMEOUT',
+  'A5': 'ACQUIRER LINK DOWN',
+  'A6': 'REVERSAL IN PROGRESS',
+  'B0': 'CARDLESS RESERVATION NOT FOUND',
+  'B1': 'CARDLESS RESERVATION TIMEOUT',
+  'B2': 'CARDLESS RESERVATION EXPIRED',
+  'B3': 'CARDLESS RESERVATION LIMIT EXCEEDED',
+  'B4': 'CARDLESS RESERVATION CANCEL NOT ALLOWED',
+  'B5': 'CARDLESS INVALU ONE TIME PIN',
+  'B6': 'CARDLESS EXCEEDED PIN TRY',
+  'B7': 'MOBILE REGISTRATION INACTIVE',
+  'B8': 'MOBILE REGISTRATION DUPLICATE ACTIVE',
+  'B9': 'MOBILE REG NOT FOUND',
+  'C0': 'DB CONN ERROR',
+  'C2': 'INVAULD CHIP CARD DATA',
+  'ERR': 'ATM HOST UNKNOWN ERR',
+  'ERR_CN': 'ATM NOTE COUNT ERR CN',
+  'ERR_CS': 'ATM CASS SETUP ERR CS',
+  'ERR_CT': 'ATM CANCEL OR TIMEOUT ERR CT',
+  'ERR_DC': 'ATM CURRENCY NOT MATCHED ERR DC',
+  'ERR_DE': 'ATM DISPENSE ERR DE',
+  'ERR_DF': 'ATM DEVICE FAULT ERR DF',
+  'ERR_EI': 'ATM EXCEED SINGLE CASS NOTE ERR EI',
+  'ERR_EM': 'ATM EXCEED MAX NOTE ERR EM',
+  'ERR_H': 'ATM HOST ERR H',
+  'ERR_IA': 'ATM INVALID AMT ERR IA',
+  'ERR_IB': 'ATM INVALID BILLER ID',
+  'ERR_IN': 'ATM INVALID NOTE ID ERR IN',
+  'ERR_MA': 'ATM MAX AMT ERR MA',
+  'ERR_MI': 'ATM MIN AMT ERR MI',
+  'ERR_TO': 'ATM HOST TIMEOUT ERR TO',
+  'FP': 'FIRST PAGE',
+  'FP_NR': 'FIRST PAGE NO RECEIPT',
+  'G1': 'GIFT OUT OF STOCK',
+  'G2': 'INVALID GIFT',
+  'LP': 'LAST PAGE',
+  'LP_NR': 'LAST PAGE NO RECEIPT',
+  'M0': 'EXCEED MERCHANT DAILY TOPUP LMT',
+  'M1': 'TOPUP BELOW MINIMUM LMT',
+  'M2': 'TOPUP ABOVE MAXIMUM LMT',
+  'MP': 'MIDDLE PAGE',
+  'MP_NR': 'MIDDLE PAGE NO RECEIPT',
+  'N7': 'INVALID CVV2',
+  'NR': 'NO RECEIPT',
+  'P0': 'FORCE PIN CHANGE',
+  'P1': 'PIN CREATE NOT ALLOWED',
+  'R0': 'CASH RETRACT',
+  'RR': 'REQUEST REVERSAL',
+  'S1': 'NO STANDIN TRXN',
+  'S2': 'STANDIN IN PROGRESS',
+  'S3': 'NO MORESOFTPIN AVAILABLE',
+  'S4': 'NO PACKAGE AVAILABLE',
+  'S5': 'NO SOFTPIN PACKAGES FOUND',
+};
+
+function getResponseReasonFromCode(responseCode, fallbackReason = '') {
+  const code = String(responseCode || '').trim().toUpperCase();
+  if (!code) return String(fallbackReason || '').trim();
+  return RESPONSE_CODE_DESCRIPTIONS[code] || String(fallbackReason || '').trim();
+}
+
 function extractFinalResultFields(fields = {}) {
   return {
     authorizationCode: String(fields.MPI_APPR_CODE || '').trim(),
@@ -641,26 +779,19 @@ function renderMessagePage(title, message, details) {
 function renderResultPage(tx, paymentStatus, finalResult) {
   const statusTone = paymentStatus === 'SUCCESS' ? '#0f9b63' : paymentStatus === 'FAILED' ? '#c62828' : '#c27a00';
   const responseCode = finalResult?.responseCode || '';
-  const responseReason = finalResult?.responseReason || '';
-  const responseSummary = responseCode && responseReason
-    ? `${responseCode} - ${responseReason}`
-    : (responseCode || responseReason || '—');
+  const responseReason = getResponseReasonFromCode(responseCode, finalResult?.responseReason || '');
 
   const rows = [
     ['Payment status', paymentStatus],
     ['Reference number (RRN)', finalResult?.referenceNumber || '—'],
     ['Authorization code', finalResult?.authorizationCode || '—'],
-    ['Response code', responseSummary],
-    ['Response reason', finalResult?.responseReason || '—'],
+    ['Response code', responseCode || '—'],
+    ['Response reason', responseReason || '—'],
   ].map(([label, value]) => `
       <div class="row">
         <div class="label">${escapeHtml(label)}</div>
         <div class="value">${escapeHtml(value)}</div>
       </div>`).join('');
-
-  const sourceNote = tx.finalResult?.source
-    ? `<p class="note">Final result source: ${escapeHtml(tx.finalResult.source)}</p>`
-    : '';
 
   return `<!doctype html>
 <html>
@@ -681,7 +812,6 @@ function renderResultPage(tx, paymentStatus, finalResult) {
     .actions{margin-top:18px;display:flex;justify-content:flex-end}
     .home-btn{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:10px;background:#165dff;color:#fff;text-decoration:none;font-weight:600;box-shadow:0 6px 14px rgba(22,93,255,.25)}
     .home-btn:hover{background:#0f4ed8}
-    .note{margin-top:14px;color:#64748b;font-size:13px}
     @media (max-width:640px){.row{flex-direction:column}.value{text-align:left}}
   </style>
 </head>
@@ -692,7 +822,6 @@ function renderResultPage(tx, paymentStatus, finalResult) {
     <p class="meta">Transaction ID: ${escapeHtml(tx.txnId)}${tx.orderRef ? ` • Order Ref: ${escapeHtml(tx.orderRef)}` : ''}</p>
     <div class="grid">${rows}
     </div>
-    ${sourceNote}
     <div class="actions">
       <a class="home-btn" href="https://standalone-ip-gintegration.vercel.app/">Back to Home</a>
     </div>
