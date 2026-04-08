@@ -518,7 +518,23 @@ const RESPONSE_CODE_DESCRIPTIONS = {
 function getResponseReasonFromCode(responseCode, fallbackReason = '') {
   const code = String(responseCode || '').trim().toUpperCase();
   if (!code) return String(fallbackReason || '').trim();
-  return RESPONSE_CODE_DESCRIPTIONS[code] || String(fallbackReason || '').trim();
+
+  if (RESPONSE_CODE_DESCRIPTIONS[code]) {
+    return RESPONSE_CODE_DESCRIPTIONS[code];
+  }
+
+  if (/^0+$/.test(code)) {
+    return RESPONSE_CODE_DESCRIPTIONS['00'] || RESPONSE_CODE_DESCRIPTIONS['0'] || String(fallbackReason || '').trim();
+  }
+
+  if (/^\d+$/.test(code)) {
+    const normalizedNumericCode = String(Number.parseInt(code, 10));
+    if (RESPONSE_CODE_DESCRIPTIONS[normalizedNumericCode]) {
+      return RESPONSE_CODE_DESCRIPTIONS[normalizedNumericCode];
+    }
+  }
+
+  return String(fallbackReason || '').trim();
 }
 
 function extractFinalResultFields(fields = {}) {
