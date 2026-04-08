@@ -548,176 +548,167 @@ function renderPublicCheckoutPage(baseUrl) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Secure Payment Checkout</title>
+  <title>Business Payment Portal</title>
   <style>
     :root{
-      --bg:#0b1220;
-      --panel:#111a2e;
-      --panel-2:#0f1728;
-      --text:#e8edf8;
-      --muted:#a5b1cb;
-      --brand:#4f8cff;
-      --brand-2:#246bff;
-      --border:#23314d;
-      --ok:#15b57a;
+      --bg:#f4f7fb;
+      --card:#ffffff;
+      --text:#10213a;
+      --muted:#5f6f86;
+      --brand:#165dff;
+      --brand-2:#0e4bd4;
+      --border:#dce5f2;
+      --ok:#0f9b63;
     }
     *{box-sizing:border-box}
     body{
       margin:0;
       font-family:Inter,Segoe UI,Arial,sans-serif;
       color:var(--text);
-      background:radial-gradient(1000px 450px at 15% -10%, #1f3f7a 0%, transparent 55%),
-                 radial-gradient(1000px 450px at 85% -10%, #203264 0%, transparent 55%),
-                 var(--bg);
+      background:linear-gradient(180deg,#f8fbff 0%, var(--bg) 100%);
       min-height:100vh;
-      padding:28px 16px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px 14px;
     }
-    .container{max-width:980px;margin:0 auto}
-    .hero{display:grid;grid-template-columns:1.1fr .9fr;gap:20px}
+    .container{width:100%;max-width:680px}
     .card{
-      background:linear-gradient(180deg,var(--panel),var(--panel-2));
+      background:var(--card);
       border:1px solid var(--border);
-      border-radius:20px;
-      box-shadow:0 14px 50px rgba(0,0,0,.45);
-      padding:24px;
+      border-radius:18px;
+      box-shadow:0 16px 40px rgba(16,33,58,.10);
+      padding:24px 22px;
     }
-    h1{margin:0 0 10px;font-size:28px;line-height:1.2}
-    p{margin:0;color:var(--muted)}
-    .badge{display:inline-block;background:rgba(79,140,255,.14);color:#9cc0ff;border:1px solid #2d4f8b;padding:6px 10px;border-radius:999px;font-size:12px;margin-bottom:12px}
-    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+    .heading{margin-bottom:16px}
+    .title{margin:0 0 6px;font-size:26px;line-height:1.2}
+    .subtitle{margin:0;color:var(--muted);font-size:14px}
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px}
     .field{display:flex;flex-direction:column;gap:6px}
     .field.full{grid-column:1 / -1}
-    label{font-size:13px;color:#c8d5ef}
-    input,select{
+    label{font-size:13px;color:#2c3f5f;font-weight:600}
+    input,textarea{
       width:100%;
-      border:1px solid #2a3a5a;
-      background:#0d1628;
-      color:var(--text);
-      border-radius:12px;
+      border:1px solid #cfdced;
+      background:#fff;
+      color:#10213a;
+      border-radius:10px;
       padding:12px 12px;
       outline:none;
       transition:border-color .2s,box-shadow .2s;
+      font-size:14px;
     }
-    input:focus,select:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(79,140,255,.2)}
+    textarea{resize:vertical;min-height:92px}
+    input:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(22,93,255,.12)}
+    .section-label{
+      grid-column:1 / -1;
+      margin-top:4px;
+      font-size:12px;
+      font-weight:700;
+      color:#4b5f80;
+      text-transform:uppercase;
+      letter-spacing:.4px;
+    }
     .submit{
-      margin-top:16px;
+      margin-top:18px;
       width:100%;
       background:linear-gradient(180deg,var(--brand),var(--brand-2));
       color:white;
       border:0;
-      border-radius:12px;
+      border-radius:10px;
       padding:13px 16px;
       font-weight:600;
       cursor:pointer;
     }
-    .button-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
-    .secondary{
-      width:100%;
-      background:transparent;
-      color:#d8e5ff;
-      border:1px solid #365388;
-      border-radius:12px;
-      padding:13px 16px;
-      font-weight:600;
-      cursor:pointer;
+    .trust{
+      margin-top:16px;
+      padding:12px;
+      border:1px solid #dde8f6;
+      border-radius:10px;
+      background:#f8fbff;
     }
-    .list{margin:14px 0 0;padding:0;list-style:none;display:grid;gap:10px}
-    .list li{display:flex;gap:10px;color:#d4def3;font-size:14px}
-    .dot{height:10px;width:10px;border-radius:999px;background:var(--ok);margin-top:4px;flex:none}
-    .meta{margin-top:14px;font-size:12px;color:#8ea0c4}
-    .link-panel{display:none;margin-top:16px;padding:14px;border-radius:14px;border:1px solid #2b4169;background:#0c1526}
-    .link-panel.active{display:block}
-    .link-panel h3{margin:0 0 8px;font-size:15px}
-    .link-panel p{margin:0 0 12px;font-size:13px}
-    .link-output{display:grid;grid-template-columns:1fr auto;gap:10px}
-    .link-output input{font-size:13px}
-    .tiny{font-size:12px;color:#8ea0c4}
+    .trust ul{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+    .trust li{display:flex;align-items:center;gap:8px;color:#3c4f6e;font-size:13px}
+    .dot{height:8px;width:8px;border-radius:999px;background:var(--ok);flex:none}
     @media (max-width:900px){
-      .hero{grid-template-columns:1fr}
       .form-grid{grid-template-columns:1fr}
-      .button-row,.link-output{grid-template-columns:1fr}
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="hero">
-      <section class="card">
-        <span class="badge">Cardzone Hosted Payment</span>
-        <h1>Fast, Simple, and Secure</h1>
-        <p>Complete your payment in just a few steps with a smooth and secure experience.</p>
-        <ul class="list">
-          <li><span class="dot"></span><span>Quick checkout flow</span></li>
-          <li><span class="dot"></span><span>Trusted payment security</span></li>
-          <li><span class="dot"></span><span>Smooth customer experience</span></li>
-        </ul>
-        <p class="meta">Securely powered by Cardzone hosted payment.</p>
-      </section>
+    <section class="card">
+      <div class="heading">
+        <h1 class="title">Business Payment Portal</h1>
+        <p class="subtitle">A standalone payment page for registered merchants to securely collect customer payments.</p>
+      </div>
 
-      <section class="card">
-        <form id="checkoutForm" method="post" action="/api/initiate" autocomplete="on">
-          <div class="form-grid">
-            <div class="field full">
-              <label for="merchantId">Merchant ID (MID) *</label>
-              <input id="merchantId" name="merchantId" required placeholder="Enter bank-registered MID" value="${escapeHtml(MERCHANT_ID_DEFAULT)}" />
-            </div>
+      <form id="checkoutForm" method="post" action="/api/initiate" autocomplete="on">
+        <div class="form-grid">
+          <div class="section-label">Payment Details</div>
 
-            <div class="field">
-              <label for="amount">Amount *</label>
-              <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
-            </div>
-
-            <div class="field">
-              <label for="currencyDisplay">Currency</label>
-              <input id="currencyDisplay" readonly placeholder="" value="" />
-            </div>
-
-            <input id="currency" name="currency" type="hidden" value="" />
-
-            <div class="field">
-              <label for="customerName">Customer Name</label>
-              <input id="customerName" name="customerName" placeholder="Optional" />
-            </div>
-
-            <div class="field">
-              <label for="email">Email</label>
-              <input id="email" name="email" type="email" placeholder="Optional" />
-            </div>
-
+          <div class="field">
+            <label for="merchantId">Merchant ID</label>
+            <input id="merchantId" name="merchantId" required placeholder="Enter registered MID" value="${escapeHtml(MERCHANT_ID_DEFAULT)}" />
           </div>
 
-          <div class="button-row">
-            <button class="submit" type="submit">Proceed to Secure Payment</button>
-            <button class="secondary" type="button" id="generateLinkButton">Generate Payment Link</button>
+          <div class="field">
+            <label for="businessName">Business Name</label>
+            <input id="businessName" name="businessName" placeholder="Enter business name" />
           </div>
 
-          <div class="link-panel" id="paymentLinkPanel">
-            <h3>Shareable payment link</h3>
-            <p>Send this link to the cardholder. Opening it will start the secure Cardzone payment flow.</p>
-            <div class="link-output">
-              <input id="paymentLinkOutput" readonly value="" />
-              <button class="secondary" type="button" id="copyLinkButton">Copy Link</button>
-            </div>
-            <p class="tiny" id="paymentLinkMeta"></p>
+          <div class="field">
+            <label for="amount">Amount</label>
+            <input id="amount" name="amount" type="number" required min="0.01" step="0.01" placeholder="0.00" />
           </div>
-        </form>
-      </section>
-    </div>
+
+          <div class="field">
+            <label for="currencyDisplay">Currency</label>
+            <input id="currencyDisplay" readonly placeholder="" value="" />
+          </div>
+
+          <div class="field full">
+            <label for="referenceNumber">Reference Number</label>
+            <input id="referenceNumber" name="orderRef" placeholder="Enter reference number" />
+          </div>
+
+          <div class="section-label">Customer Details</div>
+
+          <div class="field">
+            <label for="customerName">Customer Name</label>
+            <input id="customerName" name="customerName" placeholder="Enter customer full name" />
+          </div>
+
+          <div class="field">
+            <label for="email">Customer Email</label>
+            <input id="email" name="email" type="email" placeholder="Enter customer email" />
+          </div>
+
+          <div class="field full">
+            <label for="paymentDescription">Payment Description</label>
+            <textarea id="paymentDescription" name="paymentDescription" placeholder="Describe service or purpose of payment"></textarea>
+          </div>
+        </div>
+
+        <input id="currency" name="currency" type="hidden" value="" />
+
+        <button class="submit" type="submit">Proceed to Secure Payment</button>
+
+        <div class="trust">
+          <ul>
+            <li><span class="dot"></span><span>Secure payment processing</span></li>
+            <li><span class="dot"></span><span>3D Secure authentication</span></li>
+            <li><span class="dot"></span><span>Powered by bank payment gateway</span></li>
+          </ul>
+        </div>
+      </form>
+    </section>
   </div>
   <script>
     (function () {
-      const form = document.getElementById('checkoutForm');
       const midInput = document.getElementById('merchantId');
-      const amountInput = document.getElementById('amount');
-      const customerNameInput = document.getElementById('customerName');
-      const emailInput = document.getElementById('email');
       const currencyDisplay = document.getElementById('currencyDisplay');
       const currencyInput = document.getElementById('currency');
-      const generateLinkButton = document.getElementById('generateLinkButton');
-      const copyLinkButton = document.getElementById('copyLinkButton');
-      const paymentLinkPanel = document.getElementById('paymentLinkPanel');
-      const paymentLinkOutput = document.getElementById('paymentLinkOutput');
-      const paymentLinkMeta = document.getElementById('paymentLinkMeta');
 
       async function updateCurrency() {
         const merchantId = (midInput.value || '').trim();
@@ -749,75 +740,7 @@ function renderPublicCheckoutPage(baseUrl) {
         }
       }
 
-      async function generatePaymentLink() {
-        const merchantId = (midInput.value || '').trim();
-        const amount = (amountInput.value || '').trim();
-
-        if (!merchantId || !amount) {
-          window.alert('Enter MID and amount first.');
-          return;
-        }
-
-        generateLinkButton.disabled = true;
-        generateLinkButton.textContent = 'Generating...';
-
-        try {
-          await updateCurrency();
-
-          if (!currencyInput.value) {
-            throw new Error('MID currency not configured. Please add this MID in the merchant currency database.');
-          }
-
-          const res = await fetch('/api/payment-links', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify({
-              merchantId,
-              amount,
-              currency: currencyInput.value,
-              customerName: (customerNameInput.value || '').trim(),
-              email: (emailInput.value || '').trim()
-            })
-          });
-
-          const data = await res.json();
-          if (!res.ok || !data.paymentUrl) {
-            throw new Error(data.error || 'Unable to generate payment link.');
-          }
-
-          paymentLinkOutput.value = data.paymentUrl;
-          paymentLinkMeta.textContent = 'Currency: ' + data.currency + ' • Expires: ' + new Date(data.expiresAt).toLocaleString();
-          paymentLinkPanel.classList.add('active');
-        } catch (error) {
-          window.alert(error.message || 'Unable to generate payment link.');
-        } finally {
-          generateLinkButton.disabled = false;
-          generateLinkButton.textContent = 'Generate Payment Link';
-        }
-      }
-
-      async function copyPaymentLink() {
-        const value = paymentLinkOutput.value || '';
-        if (!value) return;
-
-        try {
-          await navigator.clipboard.writeText(value);
-          copyLinkButton.textContent = 'Copied';
-          setTimeout(() => {
-            copyLinkButton.textContent = 'Copy Link';
-          }, 1500);
-        } catch {
-          paymentLinkOutput.focus();
-          paymentLinkOutput.select();
-        }
-      }
-
       midInput.addEventListener('input', updateCurrency);
-      generateLinkButton.addEventListener('click', generatePaymentLink);
-      copyLinkButton.addEventListener('click', copyPaymentLink);
       updateCurrency();
     })();
   </script>
