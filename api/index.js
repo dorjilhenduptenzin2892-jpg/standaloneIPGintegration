@@ -788,15 +788,44 @@ function mapGatewayLookupPayload(fields = {}, fallbackTxnId = '') {
   const responseReason = getResponseReasonFromCode(responseCode, fallbackReason);
 
   return {
-    txnId: pickField(fields, ['MPI_ORI_TRXN_ID', 'MPI_TRXN_ID', 'txnId']) || fallbackTxnId,
-    amount: pickField(fields, ['MPI_PURCH_AMT', 'purchAmt', 'amount']),
-    currency: pickField(fields, ['MPI_PURCH_CURR', 'purchCurr', 'currency']),
-    approvalCode: pickField(fields, ['MPI_APPR_CODE', 'approvalCode']),
+    txnId: pickField(fields, ['MPI_ORI_TRXN_ID', 'MPI_TRXN_ID', 'txnId', 'trxnId']) || fallbackTxnId,
+    amount: pickField(fields, ['MPI_PURCH_AMT', 'MPI_TXN_AMT', 'purchAmt', 'txnAmt', 'amount']),
+    currency: pickField(fields, ['MPI_PURCH_CURR', 'MPI_TXN_CURR', 'purchCurr', 'txnCurr', 'currency']),
+    approvalCode: pickField(fields, ['MPI_APPR_CODE', 'approvalCode', 'apprCode']),
     rrn: pickField(fields, ['MPI_RRN', 'rrn']),
     responseCode,
     responseReason,
     status: mapGatewayStatus(fields),
     maskedPan: pickField(fields, ['MPI_PAN', 'maskedPan']),
+  };
+}
+
+function hasRefundLookupDetails(summary = {}) {
+  return !!(
+    String(summary.amount || '').trim() ||
+    String(summary.currency || '').trim() ||
+    String(summary.approvalCode || '').trim() ||
+    String(summary.rrn || '').trim() ||
+    String(summary.responseCode || '').trim() ||
+    String(summary.responseReason || '').trim()
+  );
+}
+
+function mapStoredTransactionToRefundLookup(tx, originalTxnId) {
+  const final = tx?.finalResult || extractFinalResultFields(tx?.callback?.fields || {});
+  const responseCode = String(final?.responseCode || '').trim();
+  const responseReason = getResponseReasonFromCode(responseCode, String(final?.responseReason || '').trim());
+
+  return {
+    txnId: String(tx?.txnId || originalTxnId || '').trim(),
+    amount: String(tx?.amountMinor || '').trim(),
+    currency: String(tx?.currency || '').trim(),
+    approvalCode: String(final?.authorizationCode || '').trim(),
+    rrn: String(final?.referenceNumber || '').trim(),
+    responseCode,
+    responseReason,
+    status: String(tx?.status || '').trim() || mapGatewayStatus(tx?.callback?.fields || {}),
+    maskedPan: '',
   };
 }
 
@@ -873,6 +902,14 @@ async function lookupTransactionForRefund({ merchantId, originalTxnId, terminalI
       ? verifySha256WithRsaBase64Url(verifyInput, response.responseFields.MPI_MAC, session.cardzonePublicKeyBase64Url)
       : false;
 
+  let summary = mapGatewayLookupPayload(response.responseFields, originalTxnId);
+  if (!hasRefundLookupDetails(summary)) {
+    const localTx = await getTransaction(originalTxnId);
+    if (localTx && String(localTx.merchantId || '').trim() === String(merchantId || '').trim()) {
+      summary = mapStoredTransactionToRefundLookup(localTx, originalTxnId);
+    }
+  }
+
   return {
     requestedAt: new Date().toISOString(),
     endpoint: CARDZONE_INQUIRY_URL,
@@ -890,7 +927,7 @@ async function lookupTransactionForRefund({ merchantId, originalTxnId, terminalI
         ? (macVerified ? 'Inquiry MPIRes MAC verified successfully' : 'Inquiry MPIRes MAC verification failed')
         : 'No MPI_MAC received on inquiry response',
     },
-    summary: mapGatewayLookupPayload(response.responseFields, originalTxnId),
+    summary,
   };
 }
 
@@ -2076,6 +2113,13 @@ async function handleRefundLookup(req, res) {
     });
   }
 
+  async function getLocalSummary() {
+    const localTx = await getTransaction(originalTxnId);
+    if (!localTx) return null;
+    if (String(localTx.merchantId || '').trim() !== merchantId) return null;
+    return mapStoredTransactionToRefundLookup(localTx, originalTxnId);
+  }
+
   try {
     const inquiry = await lookupTransactionForRefund({
       merchantId,
@@ -2083,8 +2127,26 @@ async function handleRefundLookup(req, res) {
       terminalId,
     });
 
-    return json(res, 200, inquiry.summary);
+    if (hasRefundLookupDetails(inquiry.summary)) {
+      return json(res, 200, inquiry.summary);
+    }
+
+    const localSummary = await getLocalSummary();
+    if (localSummary) {
+      return json(res, 200, localSummary);
+    }
+
+    return json(res, 404, {
+      error: 'Transaction lookup returned no usable details',
+      txnId: originalTxnId,
+      status: 'UNKNOWN',
+    });
   } catch (error) {
+    const localSummary = await getLocalSummary();
+    if (localSummary) {
+      return json(res, 200, localSummary);
+    }
+
     console.error('[Cardzone][refund][lookup] failed:', error.message);
     return json(res, 502, {
       error: 'Unable to lookup transaction for refund',
@@ -2118,13 +2180,28 @@ async function handleRefundInitiate(req, res) {
   }
 
   try {
-    const inquiry = await lookupTransactionForRefund({
-      merchantId,
-      originalTxnId,
-      terminalId: '',
-    });
+    let original = null;
 
-    const original = inquiry.summary;
+    try {
+      const inquiry = await lookupTransactionForRefund({
+        merchantId,
+        originalTxnId,
+        terminalId: '',
+      });
+      if (hasRefundLookupDetails(inquiry.summary)) {
+        original = inquiry.summary;
+      }
+    } catch {
+      // Fallback to local transaction record below
+    }
+
+    if (!original) {
+      const localTx = await getTransaction(originalTxnId);
+      if (localTx && String(localTx.merchantId || '').trim() === merchantId) {
+        original = mapStoredTransactionToRefundLookup(localTx, originalTxnId);
+      }
+    }
+
     if (!original || !original.txnId) {
       return json(res, 400, {
         error: 'originalTxnId does not exist',
