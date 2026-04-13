@@ -2281,6 +2281,15 @@ function handleHealth(req, res) {
 
 module.exports = async function handler(req, res) {
   try {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
+
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      return res.end();
+    }
+
     const u = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === 'GET' && (u.pathname === '/favicon.ico' || u.pathname === '/favicon.png')) {
@@ -2305,11 +2314,11 @@ module.exports = async function handler(req, res) {
       return await handleCreatePaymentLink(req, res);
     }
 
-    if (req.method === 'POST' && u.pathname === '/api/refund/lookup') {
+    if (req.method === 'POST' && (u.pathname === '/api/refund/lookup' || u.pathname === '/api/refund/lookup/' || u.pathname === '/refund/lookup')) {
       return await handleRefundLookup(req, res);
     }
 
-    if (req.method === 'POST' && u.pathname === '/api/refund/initiate') {
+    if (req.method === 'POST' && (u.pathname === '/api/refund/initiate' || u.pathname === '/api/refund/initiate/' || u.pathname === '/refund/initiate')) {
       return await handleRefundInitiate(req, res);
     }
 
