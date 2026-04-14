@@ -759,10 +759,48 @@ function isApprovedResponseCode(responseCode) {
 }
 
 function pickField(fields, candidates = []) {
-  for (const field of candidates) {
+  if (!fields || typeof fields !== 'object') return '';
+
+  const candidateList = candidates.map(item => String(item || '').trim()).filter(Boolean);
+  const lowerCandidates = new Set(candidateList.map(item => item.toLowerCase()));
+
+  for (const field of candidateList) {
     const value = String(fields?.[field] || '').trim();
     if (value) return value;
   }
+
+  for (const [key, value] of Object.entries(fields)) {
+    if (lowerCandidates.has(String(key || '').toLowerCase())) {
+      const text = String(value || '').trim();
+      if (text) return text;
+    }
+  }
+
+  const stack = [fields];
+  const visited = new Set();
+  while (stack.length) {
+    const node = stack.pop();
+    if (!node || typeof node !== 'object' || visited.has(node)) continue;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (item && typeof item === 'object') stack.push(item);
+      }
+      continue;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      if (lowerCandidates.has(String(key || '').toLowerCase())) {
+        const text = String(value || '').trim();
+        if (text) return text;
+      }
+      if (value && typeof value === 'object') {
+        stack.push(value);
+      }
+    }
+  }
+
   return '';
 }
 
@@ -784,11 +822,11 @@ function mapGatewayStatus(fields = {}) {
 
 function mapGatewayLookupPayload(fields = {}, fallbackTxnId = '') {
   const responseCode = pickField(fields, ['MPI_ERROR_CODE', 'responseCode', 'errorCode']);
-  const fallbackReason = pickField(fields, ['MPI_ERROR_DESC', 'MPI_CARDHOLDER_INFO', 'responseReason']);
+  const fallbackReason = pickField(fields, ['MPI_ERROR_DESC', 'MPI_CARDHOLDER_INFO', 'responseReason', 'errorDescription', 'message']);
   const responseReason = getResponseReasonFromCode(responseCode, fallbackReason);
 
   return {
-    txnId: pickField(fields, ['MPI_ORI_TRXN_ID', 'MPI_TRXN_ID', 'txnId', 'trxnId']) || fallbackTxnId,
+    txnId: pickField(fields, ['MPI_ORI_TRXN_ID', 'MPI_TRXN_ID', 'txnId', 'trxnId', 'ORI_TRXN_ID']) || fallbackTxnId,
     amount: pickField(fields, ['MPI_PURCH_AMT', 'MPI_TXN_AMT', 'purchAmt', 'txnAmt', 'amount']),
     currency: pickField(fields, ['MPI_PURCH_CURR', 'MPI_TXN_CURR', 'purchCurr', 'txnCurr', 'currency']),
     approvalCode: pickField(fields, ['MPI_APPR_CODE', 'approvalCode', 'apprCode']),
@@ -2136,9 +2174,14 @@ async function handleRefundLookup(req, res) {
       return json(res, 200, localSummary);
     }
 
-    return json(res, 404, {
-      error: 'Transaction lookup returned no usable details',
+    return json(res, 200, {
       txnId: originalTxnId,
+      amount: '',
+      currency: '',
+      approvalCode: '',
+      rrn: '',
+      responseCode: '',
+      responseReason: 'Inquiry completed but no transaction details were returned by gateway',
       status: 'UNKNOWN',
     });
   } catch (error) {
