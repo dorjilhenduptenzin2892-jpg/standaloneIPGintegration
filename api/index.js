@@ -637,6 +637,63 @@ async function getPaymentLink(token) {
   }
 }
 
+function matchesTxnReference(tx, referenceId) {
+  const ref = String(referenceId || '').trim();
+  if (!ref || !tx || typeof tx !== 'object') return false;
+
+  const callbackFields = tx.callback?.fields || {};
+  const candidates = [
+    tx.txnId,
+    callbackFields.MPI_TRXN_ID,
+    callbackFields.MPI_ORI_TRXN_ID,
+    callbackFields.trxnId,
+    callbackFields.txnId,
+  ].map(v => String(v || '').trim()).filter(Boolean);
+
+  return candidates.includes(ref);
+}
+
+async function findStoredTransactionForRefund(merchantId, originalTxnId) {
+  const mid = String(merchantId || '').trim();
+  const ref = String(originalTxnId || '').trim();
+  if (!mid || !ref) return null;
+
+  const direct = await getTransaction(ref);
+  if (direct && String(direct.merchantId || '').trim() === mid) {
+    return direct;
+  }
+
+  for (const tx of txStore.values()) {
+    if (String(tx?.merchantId || '').trim() !== mid) continue;
+    if (matchesTxnReference(tx, ref)) return tx;
+  }
+
+  try {
+    const files = await fs.readdir(TEMP_DIR);
+    const txFiles = files.filter(name => /^txn_.+\.json$/i.test(name));
+
+    for (const fileName of txFiles) {
+      try {
+        const content = await fs.readFile(path.join(TEMP_DIR, fileName), 'utf8');
+        const tx = JSON.parse(content);
+        if (String(tx?.merchantId || '').trim() !== mid) continue;
+        if (!matchesTxnReference(tx, ref)) continue;
+
+        if (tx?.txnId) {
+          txStore.set(String(tx.txnId), tx);
+        }
+        return tx;
+      } catch {
+        // ignore unreadable transaction files
+      }
+    }
+  } catch {
+    // ignore temp directory read errors
+  }
+
+  return null;
+}
+
 function generatePaymentLinkToken() {
   return crypto.randomBytes(18).toString('base64url');
 }
@@ -850,20 +907,26 @@ function hasRefundLookupDetails(summary = {}) {
 }
 
 function mapStoredTransactionToRefundLookup(tx, originalTxnId) {
-  const final = tx?.finalResult || extractFinalResultFields(tx?.callback?.fields || {});
+  const callbackFields = tx?.callback?.fields || {};
+  const final = tx?.finalResult || extractFinalResultFields(callbackFields);
   const responseCode = String(final?.responseCode || '').trim();
   const responseReason = getResponseReasonFromCode(responseCode, String(final?.responseReason || '').trim());
+  const fallbackAmount = pickField(callbackFields, ['MPI_PURCH_AMT', 'MPI_TXN_AMT', 'amount']);
+  const fallbackCurrency = pickField(callbackFields, ['MPI_PURCH_CURR', 'MPI_TXN_CURR', 'currency']);
+  const fallbackTxnId = pickField(callbackFields, ['MPI_TRXN_ID', 'MPI_ORI_TRXN_ID', 'txnId', 'trxnId']);
+  const fallbackPan = pickField(callbackFields, ['MPI_PAN', 'maskedPan']);
 
   return {
-    txnId: String(tx?.txnId || originalTxnId || '').trim(),
-    amount: String(tx?.amountMinor || '').trim(),
-    currency: String(tx?.currency || '').trim(),
+    txnId: String(tx?.txnId || fallbackTxnId || originalTxnId || '').trim(),
+    amount: String(tx?.amountMinor || fallbackAmount || '').trim(),
+    currency: String(tx?.currency || fallbackCurrency || '').trim(),
     approvalCode: String(final?.authorizationCode || '').trim(),
     rrn: String(final?.referenceNumber || '').trim(),
     responseCode,
     responseReason,
-    status: String(tx?.status || '').trim() || mapGatewayStatus(tx?.callback?.fields || {}),
-    maskedPan: '',
+    status: String(tx?.status || '').trim() || mapGatewayStatus(callbackFields),
+    maskedPan: String(fallbackPan || '').trim(),
+    callbackRawFields: callbackFields,
   };
 }
 
@@ -942,7 +1005,7 @@ async function lookupTransactionForRefund({ merchantId, originalTxnId, terminalI
 
   let summary = mapGatewayLookupPayload(response.responseFields, originalTxnId);
   if (!hasRefundLookupDetails(summary)) {
-    const localTx = await getTransaction(originalTxnId);
+    const localTx = await findStoredTransactionForRefund(merchantId, originalTxnId);
     if (localTx && String(localTx.merchantId || '').trim() === String(merchantId || '').trim()) {
       summary = mapStoredTransactionToRefundLookup(localTx, originalTxnId);
     }
@@ -2152,7 +2215,7 @@ async function handleRefundLookup(req, res) {
   }
 
   async function getLocalSummary() {
-    const localTx = await getTransaction(originalTxnId);
+    const localTx = await findStoredTransactionForRefund(merchantId, originalTxnId);
     if (!localTx) return null;
     if (String(localTx.merchantId || '').trim() !== merchantId) return null;
     return mapStoredTransactionToRefundLookup(localTx, originalTxnId);
@@ -2239,7 +2302,7 @@ async function handleRefundInitiate(req, res) {
     }
 
     if (!original) {
-      const localTx = await getTransaction(originalTxnId);
+      const localTx = await findStoredTransactionForRefund(merchantId, originalTxnId);
       if (localTx && String(localTx.merchantId || '').trim() === merchantId) {
         original = mapStoredTransactionToRefundLookup(localTx, originalTxnId);
       }
